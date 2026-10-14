@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Grocery Tracker & Replenishment Intelligence</title>
+  <meta name="description" content="Local receipt scanner, spending analytics, and daily/weekly/monthly grocery replenishment estimator.">
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- Chart.js for data visualizations -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="dark-theme">
+  <div class="app-container">
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-icon">🛒</div>
+        <div class="brand-text">
+          <h2>PantryPulse</h2>
+          <span>Groceries & Replenish</span>
+        </div>
+      </div>
+
+      <nav class="nav-menu">
+        <button id="nav-scanner" class="nav-item active" onclick="switchTab('scanner')">
+          <span class="icon">📷</span>
+          <span class="label">Receipt Scanner</span>
+          <span id="badge-unprocessed" class="nav-badge" style="display:none;">0</span>
+        </button>
+        <button id="nav-receipts" class="nav-item" onclick="switchTab('receipts')">
+          <span class="icon">🧾</span>
+          <span class="label">Saved Receipts</span>
+        </button>
+        <button id="nav-reports" class="nav-item" onclick="switchTab('reports')">
+          <span class="icon">📊</span>
+          <span class="label">Reports & Spend</span>
+        </button>
+        <button id="nav-replenish" class="nav-item" onclick="switchTab('replenish')">
+          <span class="icon">⚡</span>
+          <span class="label">Consumption Estimator</span>
+          <span id="badge-restock" class="nav-badge alert" style="display:none;">0</span>
+        </button>
+        <button id="nav-settings" class="nav-item" onclick="switchTab('settings')">
+          <span class="icon">⚙️</span>
+          <span class="label">Settings</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="engine-indicator" id="engine-status-indicator">
+          <span class="status-dot online"></span>
+          <span id="engine-status-text">Ollama Gemma Ready</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      <!-- Top Bar -->
+      <header class="top-header">
+        <div class="header-title">
+          <h1 id="page-title">Receipt Scanner & Ingestion</h1>
+          <p id="page-subtitle">Scan and convert physical grocery receipts from <code>/receipts</code> into actionable replenishment records.</p>
+        </div>
+        <div class="header-actions">
+          <button id="btn-scan-receipts" class="btn btn-primary" onclick="loadReceiptFiles()">
+            <span class="icon">🔄</span> Scan /receipts
+          </button>
+        </div>
+      </header>
+
+      <!-- TAB 1: SCANNER -->
+      <section id="view-scanner" class="tab-view active">
+        <div class="stats-ribbon">
+          <div class="stat-card">
+            <span class="stat-label">Discovered Files</span>
+            <span class="stat-value" id="stat-total-files">0</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Pending Ingestion</span>
+            <span class="stat-value warning" id="stat-pending-files">0</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Processed & Saved</span>
+            <span class="stat-value success" id="stat-saved-files">0</span>
+          </div>
+        </div>
+
+        <div class="section-card">
+          <div class="card-header">
+            <h3>Files in <code>receipts/</code> Directory</h3>
+            <span class="text-muted">Place phone photos (.jpg, .png) into <code>/receipts</code> and click Parse to extract with AI</span>
+          </div>
+          <div id="receipt-files-grid" class="files-grid">
+            <div class="loading-state">Scanning receipts directory...</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 2: SAVED RECEIPTS -->
+      <section id="view-receipts" class="tab-view">
+        <div class="section-card">
+          <div class="card-header flex-between">
+            <div>
+              <h3>Saved Grocery Receipts</h3>
+              <span class="text-muted">History of parsed and confirmed shopping trips</span>
+            </div>
+            <input type="text" id="receipts-search" placeholder="Search provider or date..." class="search-input" oninput="renderSavedReceiptsTable()">
+          </div>
+          <div class="table-responsive">
+            <table class="data-table" id="table-saved-receipts">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Supermarket</th>
+                  <th>Items</th>
+                  <th>Total Cost</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="tbody-saved-receipts">
+                <tr><td colspan="6" class="text-center">Loading receipts...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 3: REPORTS & ANALYTICS -->
+      <section id="view-reports" class="tab-view">
+        <!-- KPI Cards -->
+        <div class="stats-ribbon">
+          <div class="stat-card highlight">
+            <span class="stat-label">Total Grocery Spend</span>
+            <span class="stat-value" id="kpi-total-spend">€0.00</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Total Shopping Trips</span>
+            <span class="stat-value" id="kpi-total-trips">0</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Unique Items Tracked</span>
+            <span class="stat-value" id="kpi-total-items">0</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Average Trip Cost</span>
+            <span class="stat-value" id="kpi-avg-trip">€0.00</span>
+          </div>
+        </div>
+
+        <!-- Filter Bar -->
+        <div class="filter-bar">
+          <div class="filter-group">
+            <label for="filter-provider">Provider:</label>
+            <select id="filter-provider" onchange="loadReports()">
+              <option value="">All Providers</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label for="filter-category">Category:</label>
+            <select id="filter-category" onchange="loadReports()">
+              <option value="">All Categories</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label for="filter-search-item">Search Item:</label>
+            <input type="text" id="filter-search-item" placeholder="Filter items..." oninput="filterItemsTable()">
+          </div>
+          <div class="filter-actions">
+            <button class="btn btn-secondary btn-sm" onclick="exportData('csv')">📥 Export CSV</button>
+            <button class="btn btn-secondary btn-sm" onclick="exportData('json')">Export JSON</button>
+          </div>
+        </div>
+
+        <!-- Visual Charts Grid -->
+        <div class="charts-grid">
+          <div class="chart-card">
+            <h4>Spend by Supermarket / Provider</h4>
+            <div class="chart-container">
+              <canvas id="chart-providers"></canvas>
+            </div>
+          </div>
+          <div class="chart-card">
+            <h4>Spend by Category</h4>
+            <div class="chart-container">
+              <canvas id="chart-categories"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- Detailed Items Aggregate Table -->
+        <div class="section-card">
+          <div class="card-header">
+            <h3>Items Breakdown</h3>
+            <span class="text-muted">Aggregated by item, quantity, unit price, and total spend</span>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table" id="table-items-report">
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th>Category</th>
+                  <th>Total Qty</th>
+                  <th>Avg Unit Price</th>
+                  <th>Total Spend</th>
+                  <th>Trip Count</th>
+                  <th>Last Purchased</th>
+                </tr>
+              </thead>
+              <tbody id="tbody-items-report">
+                <tr><td colspan="7" class="text-center">Loading reports...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 4: CONSUMPTION ESTIMATOR -->
+      <section id="view-replenish" class="tab-view">
+        <div class="callout-card" id="replenish-alert-box">
+          <div class="callout-icon">⚡</div>
+          <div class="callout-content">
+            <h4>Smart Replenishment Intelligence</h4>
+            <p id="replenish-alert-summary">Analyzing your purchase frequency and quantities to project daily, weekly, and monthly consumption burn rates.</p>
+          </div>
+        </div>
+
+        <!-- Filter Pills -->
+        <div class="pill-filters">
+          <button class="pill active" onclick="filterConsumption('all', this)">All Items (<span id="count-all-c">0</span>)</button>
+          <button class="pill alert" onclick="filterConsumption('overdue', this)">Needs Restock (<span id="count-overdue-c">0</span>)</button>
+          <button class="pill warning" onclick="filterConsumption('low', this)">Running Low (<span id="count-low-c">0</span>)</button>
+          <button class="pill success" onclick="filterConsumption('ok', this)">Sufficient (<span id="count-ok-c">0</span>)</button>
+        </div>
+
+        <div class="section-card">
+          <div class="table-responsive">
+            <table class="data-table" id="table-consumption">
+              <thead>
+                <tr>
+                  <th>Item & Category</th>
+                  <th>Daily Burn</th>
+                  <th>Weekly Burn</th>
+                  <th>Monthly Burn</th>
+                  <th>Stock Remaining</th>
+                  <th>Days Left</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="tbody-consumption">
+                <tr><td colspan="7" class="text-center">Calculating consumption metrics...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 5: SETTINGS -->
+      <section id="view-settings" class="tab-view">
+        <div class="section-card narrow-card">
+          <div class="card-header">
+            <h3>AI Extraction Configuration</h3>
+            <p class="text-muted">Configure your primary vision API (Copencode / OpenAI-compatible / OpenRouter) and local Ollama fallback.</p>
+          </div>
+          <form id="form-settings" onsubmit="saveSettings(event)" class="settings-form">
+            <div class="form-section">
+              <h4>Primary Vision API (Optional)</h4>
+              <p class="section-subtext">If configured, this endpoint will be used first. If it fails or is left blank, the app falls back to local Ollama.</p>
+              
+              <div class="form-group">
+                <label for="input-primary-base-url">API Base URL:</label>
+                <input type="text" id="input-primary-base-url" placeholder="https://api.openai.com/v1 or custom Copencode endpoint">
+              </div>
+
+              <div class="form-group">
+                <label for="input-primary-key">API Key:</label>
+                <input type="password" id="input-primary-key" placeholder="Enter API Key (stored locally)">
+              </div>
+
+              <div class="form-group">
+                <label for="input-primary-model">Vision Model Name:</label>
+                <input type="text" id="input-primary-model" placeholder="gpt-4o-mini or other vision model">
+              </div>
+            </div>
+
+            <div class="form-section">
+              <h4>Local Ollama Vision (Fallback / Offline)</h4>
+              <p class="section-subtext">Runs 100% locally on your machine via Ollama.</p>
+
+              <div class="form-group">
+                <label for="input-ollama-base-url">Ollama URL:</label>
+                <input type="text" id="input-ollama-base-url" value="http://127.0.0.1:11434">
+              </div>
+
+              <div class="form-group">
+                <label for="input-ollama-model">Ollama Vision Model:</label>
+                <input type="text" id="input-ollama-model" value="gemma4:e2b">
+              </div>
+
+              <div class="form-group">
+                <label for="input-ollama-timeout">Inference Timeout (Seconds):</label>
+                <input type="number" id="input-ollama-timeout" value="180">
+              </div>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary">Save Settings</button>
+              <button type="button" class="btn btn-secondary" onclick="testPrimaryApiConnection()">⚡ Test Primary API</button>
+              <button type="button" class="btn btn-secondary" onclick="testOllamaConnection()">🦙 Test Ollama</button>
+            </div>
+            <div id="settings-status" class="status-msg"></div>
+          </form>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- SPLIT SCREEN REVIEW & VERIFY MODAL -->
+  <div id="modal-review" class="modal-overlay" style="display:none;">
+    <div class="modal-container split-modal">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <h2 id="review-modal-title">Review & Verify Receipt</h2>
+          <span id="review-engine-badge" class="engine-badge">Engine: Ollama</span>
+        </div>
+        <button class="btn-close" onclick="closeReviewModal()">✕</button>
+      </div>
+
+      <div class="modal-body split-body">
+        <!-- Left Pane: Image Viewer -->
+        <div class="split-left">
+          <div class="image-viewer-toolbar">
+            <span id="review-image-filename" class="image-name">filename.jpg</span>
+            <div class="toolbar-btns">
+              <button class="btn-icon" title="Zoom In" onclick="zoomImage(0.2)">➕</button>
+              <button class="btn-icon" title="Zoom Out" onclick="zoomImage(-0.2)">➖</button>
+              <button class="btn-icon" title="Reset Zoom" onclick="resetImageZoom()">⟲</button>
+            </div>
+          </div>
+          <div class="image-viewport" id="image-viewport">
+            <img id="review-receipt-img" src="" alt="Receipt Image Preview">
+          </div>
+        </div>
+
+        <!-- Right Pane: Extracted Line Items & Form -->
+        <div class="split-right">
+          <div class="receipt-meta-grid">
+            <div class="form-group">
+              <label for="input-meta-provider">Supermarket / Store:</label>
+              <input type="text" id="input-meta-provider" required>
+            </div>
+            <div class="form-group">
+              <label for="input-meta-date">Receipt Date:</label>
+              <input type="date" id="input-meta-date" required>
+            </div>
+            <div class="form-group">
+              <label for="input-meta-total">Total Amount (€):</label>
+              <input type="number" step="0.01" id="input-meta-total" required>
+            </div>
+            <div class="form-group">
+              <label for="input-meta-currency">Currency:</label>
+              <input type="text" id="input-meta-currency" value="EUR">
+            </div>
+          </div>
+
+          <div class="items-editor-header flex-between">
+            <h4>Extracted Line Items (<span id="review-items-count">0</span>)</h4>
+            <button type="button" class="btn btn-secondary btn-xs" onclick="addNewItemRow()">➕ Add Item</button>
+          </div>
+
+          <div class="items-table-container">
+            <table class="data-table editable-table" id="table-review-items">
+              <thead>
+                <tr>
+                  <th style="width: 28%;">Item Name</th>
+                  <th style="width: 24%;">Clean Name</th>
+                  <th style="width: 12%;">Qty</th>
+                  <th style="width: 10%;">Unit</th>
+                  <th style="width: 12%;">Price (€)</th>
+                  <th style="width: 12%;">Total (€)</th>
+                  <th style="width: 22%;">Category</th>
+                  <th style="width: 6%;"></th>
+                </tr>
+              </thead>
+              <tbody id="tbody-review-items">
+                <!-- Dynamically populated rows -->
+              </tbody>
+            </table>
+          </div>
+
+          <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="closeReviewModal()">Cancel</button>
+            <button class="btn btn-primary" id="btn-save-confirmed" onclick="saveConfirmedReceipt()">💾 Confirm & Save Record</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- LOADING OVERLAY -->
+  <div id="loading-overlay" class="loading-overlay" style="display:none;">
+    <div class="spinner"></div>
+    <h3 id="loading-message">Processing Receipt...</h3>
+    <p id="loading-sub">Running vision extraction model. Please wait...</p>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
