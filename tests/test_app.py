@@ -252,3 +252,50 @@ def test_build_primary_api_request_opencode_responses_url():
     assert extract_text_from_api_response(resp_data_3) == "{\"provider\": \"Mercadona\"}"
 
 
+def test_duplicate_receipt_detection_via_invoice_id():
+    from backend.db import get_receipt_by_invoice_id
+
+    # 1. Save initial receipt with invoice ID
+    p1 = {
+        "filename": "scan_A.jpg",
+        "provider": "Mercadona",
+        "receipt_date": "2026-10-10",
+        "total_amount": 15.00,
+        "invoice_id": "3572-016-394107",
+        "items": [
+            {"name": "Milk", "clean_name": "Milk", "quantity": 1.0, "unit": "L", "unit_price": 1.5, "total_price": 1.5, "category": "Dairy & Eggs"}
+        ]
+    }
+    resp1 = client.post("/api/receipts/save", json=p1)
+    assert resp1.status_code == 200
+    id1 = resp1.json()["receipt_id"]
+
+    # 2. Query by invoice_id
+    found = get_receipt_by_invoice_id("3572-016-394107", "Mercadona")
+    assert found is not None
+    assert found["id"] == id1
+    assert found["filename"] == "scan_A.jpg"
+    assert found["invoice_id"] == "3572-016-394107"
+
+    # 3. Saving another file with the same invoice_id updates/merges the existing receipt
+    p2 = {
+        "filename": "scan_B_duplicate.jpg",
+        "provider": "Mercadona",
+        "receipt_date": "2026-10-10",
+        "total_amount": 15.00,
+        "invoice_id": "3572-016-394107",
+        "items": [
+            {"name": "Milk", "clean_name": "Milk", "quantity": 1.0, "unit": "L", "unit_price": 1.5, "total_price": 1.5, "category": "Dairy & Eggs"}
+        ]
+    }
+    resp2 = client.post("/api/receipts/save", json=p2)
+    assert resp2.status_code == 200
+    id2 = resp2.json()["receipt_id"]
+    # Should update the existing record rather than creating a duplicate
+    assert id2 == id1
+
+    # Verify total receipt count in database is still 1
+    resp_list = client.get("/api/receipts")
+    assert len(resp_list.json()["receipts"]) == 1
+
+

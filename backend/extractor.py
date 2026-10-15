@@ -27,6 +27,7 @@ You must return ONLY a valid JSON object (no extra commentary, markdown explanat
 {{
   "provider": "Store or Supermarket name (e.g. Mercadona, Carrefour, Lidl, Trader Joe's)",
   "receipt_date": "YYYY-MM-DD (Date of the purchase; if unclear, use 2026-10-14)",
+  "invoice_id": "Ticket, Invoice, or Factura Simplificada number/code printed on receipt (e.g. 3572-016-394107, or null if not found)",
   "currency": "EUR (or currency code on receipt)",
   "total_amount": 0.0,
   "items": [
@@ -139,9 +140,15 @@ def clean_json_response(text: str) -> Dict[str, Any]:
     except (ValueError, TypeError):
         total_amount = sum(i["total_price"] for i in cleaned_items)
 
+    raw_invoice = data.get("invoice_id")
+    invoice_id = str(raw_invoice).strip() if raw_invoice is not None else None
+    if invoice_id and invoice_id.lower() in ("null", "none", "n/a", "undefined", ""):
+        invoice_id = None
+
     return {
         "provider": str(data.get("provider", "Unknown Store")).strip(),
         "receipt_date": str(data.get("receipt_date", "2026-10-14")).strip(),
+        "invoice_id": invoice_id,
         "currency": str(data.get("currency", "EUR")).strip(),
         "total_amount": round(total_amount, 2),
         "items": cleaned_items

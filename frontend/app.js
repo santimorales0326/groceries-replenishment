@@ -180,6 +180,7 @@ async function loadReceiptFiles() {
             ${isSaved ? `
               <div style="margin-top:6px; font-size:12px; color:#10B981;">
                 <strong>${file.provider || 'Saved Store'}</strong> • €${(file.total_amount || 0).toFixed(2)} (${file.item_count} items)
+                ${file.invoice_id ? ` • <span style="color:#64748B;">ID: ${escapeHtml(file.invoice_id)}</span>` : ''}
               </div>
             ` : ''}
           </div>
@@ -216,7 +217,7 @@ async function parseReceiptFile(filename) {
     }
     const result = await res.json();
     hideLoading();
-    openReviewModal(result.data, result.engine);
+    openReviewModal(result.data, result.engine, result.duplicate_of);
   } catch (err) {
     hideLoading();
     alert(`Receipt parsing error: ${err.message}`);
@@ -226,7 +227,7 @@ async function parseReceiptFile(filename) {
 // -------------------------------------------------------------
 // SPLIT REVIEW & VERIFICATION MODAL
 // -------------------------------------------------------------
-function openReviewModal(data, engine = 'AI Engine') {
+function openReviewModal(data, engine = 'AI Engine', duplicateOf = null) {
   currentReviewData = JSON.parse(JSON.stringify(data));
   document.getElementById('review-modal-title').innerText = `Review: ${data.filename}`;
   document.getElementById('review-engine-badge').innerText = `Engine: ${engine}`;
@@ -237,8 +238,20 @@ function openReviewModal(data, engine = 'AI Engine') {
   imgEl.src = `/api/receipt-image/${encodeURIComponent(data.filename)}`;
   resetImageZoom();
 
+  // Handle duplicate warning banner
+  const warnBanner = document.getElementById('duplicate-warning-banner');
+  const warnText = document.getElementById('duplicate-warning-text');
+  if (duplicateOf && warnBanner && warnText) {
+    warnText.innerHTML = `Receipt with Invoice ID <strong>${escapeHtml(duplicateOf.invoice_id || '')}</strong> was already saved from file <code>${escapeHtml(duplicateOf.filename)}</code> on ${duplicateOf.receipt_date} (€${Number(duplicateOf.total_amount).toFixed(2)}). Saving will update the existing entry to prevent duplicate records.`;
+    warnBanner.style.display = 'block';
+  } else if (warnBanner) {
+    warnBanner.style.display = 'none';
+  }
+
   // Populate Meta fields
   document.getElementById('input-meta-provider').value = data.provider || '';
+  const invInput = document.getElementById('input-meta-invoice');
+  if (invInput) invInput.value = data.invoice_id || '';
   document.getElementById('input-meta-date').value = (data.receipt_date || '').substring(0, 10);
   document.getElementById('input-meta-total').value = (data.total_amount || 0).toFixed(2);
   document.getElementById('input-meta-currency').value = data.currency || 'EUR';
@@ -338,8 +351,10 @@ async function saveConfirmedReceipt() {
   btn.disabled = true;
   btn.textContent = 'Saving...';
 
+  const invVal = (document.getElementById('input-meta-invoice')?.value || '').trim();
   const payload = {
     filename: currentReviewData.filename,
+    invoice_id: invVal || null,
     provider: document.getElementById('input-meta-provider').value.trim() || 'Unknown Store',
     receipt_date: document.getElementById('input-meta-date').value || new Date().toISOString().substring(0, 10),
     total_amount: parseFloat(document.getElementById('input-meta-total').value) || 0.0,

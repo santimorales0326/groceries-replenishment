@@ -20,6 +20,7 @@ from backend.db import (
     get_receipts,
     get_receipt,
     get_receipt_by_filename,
+    get_receipt_by_invoice_id,
     delete_receipt,
     get_all_categories,
     get_distinct_providers,
@@ -72,6 +73,7 @@ class ReceiptSaveSchema(BaseModel):
     provider: str
     receipt_date: str
     total_amount: float
+    invoice_id: Optional[str] = None
     currency: str = "EUR"
     notes: Optional[str] = ""
     status: str = "confirmed"
@@ -118,6 +120,7 @@ def list_receipt_files():
                     "status": "saved" if existing else "unprocessed",
                     "receipt_id": existing["id"] if existing else None,
                     "provider": existing["provider"] if existing else None,
+                    "invoice_id": existing.get("invoice_id") if existing else None,
                     "receipt_date": existing["receipt_date"] if existing else None,
                     "total_amount": existing["total_amount"] if existing else None,
                     "item_count": len(existing["items"]) if existing else 0,
@@ -137,7 +140,23 @@ async def parse_receipt(filename: str):
     try:
         parsed_data, engine = await parse_receipt_image(str(filepath))
         parsed_data["filename"] = filename
-        return {"data": parsed_data, "engine": engine}
+
+        # Check for duplicate receipt by invoice_id
+        duplicate_of = None
+        inv_id = parsed_data.get("invoice_id")
+        if inv_id:
+            existing = get_receipt_by_invoice_id(inv_id, parsed_data.get("provider"))
+            if existing and existing.get("filename") != filename:
+                duplicate_of = {
+                    "id": existing["id"],
+                    "filename": existing["filename"],
+                    "provider": existing["provider"],
+                    "invoice_id": existing.get("invoice_id"),
+                    "receipt_date": existing["receipt_date"],
+                    "total_amount": existing["total_amount"],
+                }
+
+        return {"data": parsed_data, "engine": engine, "duplicate_of": duplicate_of}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Extraction failed: {str(e)}")
 

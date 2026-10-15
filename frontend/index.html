@@ -349,10 +349,18 @@
 
         <!-- Right Pane: Extracted Line Items & Form -->
         <div class="split-right">
+          <div id="duplicate-warning-banner" class="alert-banner warning" style="display:none; margin-bottom: 14px; padding: 10px 14px; background: rgba(245, 158, 11, 0.12); border: 1px solid #f59e0b; border-radius: 8px; font-size: 13px; color: #b45309; line-height: 1.4;">
+            <strong>⚠️ Possible Duplicate Detected:</strong> <span id="duplicate-warning-text"></span>
+          </div>
+
           <div class="receipt-meta-grid">
             <div class="form-group">
               <label for="input-meta-provider">Supermarket / Store:</label>
               <input type="text" id="input-meta-provider" required>
+            </div>
+            <div class="form-group">
+              <label for="input-meta-invoice">Invoice / Ticket ID:</label>
+              <input type="text" id="input-meta-invoice" placeholder="e.g. 3572-016-394107">
             </div>
             <div class="form-group">
               <label for="input-meta-date">Receipt Date:</label>

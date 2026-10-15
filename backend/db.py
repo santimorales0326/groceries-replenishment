@@ -43,9 +43,15 @@ def init_db():
                 status TEXT DEFAULT 'confirmed',
                 raw_json TEXT,
                 notes TEXT,
+                invoice_id TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+
+        # Ensure invoice_id column exists if table already existed
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(receipts)").fetchall()]
+        if "invoice_id" not in cols:
+            conn.execute("ALTER TABLE receipts ADD COLUMN invoice_id TEXT")
 
         conn.execute("""
             CREATE TABLE IF NOT EXISTS receipt_items (
@@ -103,24 +109,36 @@ def save_receipt(receipt_data: Dict[str, Any]) -> int:
         notes = receipt_data.get("notes", "")
         raw_json = json.dumps(receipt_data.get("raw_json", {}))
         file_hash = receipt_data.get("file_hash", "")
+        raw_inv = receipt_data.get("invoice_id")
+        invoice_id = str(raw_inv).strip() if raw_inv is not None else None
+        if invoice_id and invoice_id.lower() in ("null", "none", "n/a", "undefined", ""):
+            invoice_id = None
 
-        # Check existing receipt by filename
-        existing = conn.execute("SELECT id FROM receipts WHERE filename = ?", (filename,)).fetchone()
+        # Check existing receipt by filename, or by (invoice_id, provider)
+        existing = None
+        if filename:
+            existing = conn.execute("SELECT id FROM receipts WHERE filename = ?", (filename,)).fetchone()
+        if not existing and invoice_id:
+            existing = conn.execute(
+                "SELECT id FROM receipts WHERE invoice_id = ? AND provider = ?",
+                (invoice_id, provider)
+            ).fetchone()
+
         if existing:
             receipt_id = existing["id"]
             conn.execute("""
                 UPDATE receipts
-                SET provider = ?, receipt_date = ?, total_amount = ?, currency = ?,
-                    status = ?, notes = ?, raw_json = ?, file_hash = ?
+                SET filename = ?, provider = ?, receipt_date = ?, total_amount = ?, currency = ?,
+                    status = ?, notes = ?, raw_json = ?, file_hash = ?, invoice_id = ?
                 WHERE id = ?
-            """, (provider, receipt_date, total_amount, currency, status, notes, raw_json, file_hash, receipt_id))
+            """, (filename, provider, receipt_date, total_amount, currency, status, notes, raw_json, file_hash, invoice_id, receipt_id))
             # Delete old items to cleanly overwrite
             conn.execute("DELETE FROM receipt_items WHERE receipt_id = ?", (receipt_id,))
         else:
             cur = conn.execute("""
-                INSERT INTO receipts (filename, file_hash, provider, receipt_date, total_amount, currency, status, notes, raw_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (filename, file_hash, provider, receipt_date, total_amount, currency, status, notes, raw_json))
+                INSERT INTO receipts (filename, file_hash, provider, receipt_date, total_amount, currency, status, notes, raw_json, invoice_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (filename, file_hash, provider, receipt_date, total_amount, currency, status, notes, raw_json, invoice_id))
             receipt_id = cur.lastrowid
 
         # Insert items
@@ -142,6 +160,27 @@ def save_receipt(receipt_data: Dict[str, Any]) -> int:
 
     conn.close()
     return receipt_id
+
+
+def get_receipt_by_invoice_id(invoice_id: str, provider: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Lookup receipt by invoice ID, optionally filtered by provider."""
+    if not invoice_id:
+        return None
+    conn = get_db_connection()
+    clean_id = invoice_id.strip()
+    if provider:
+        cur = conn.execute("SELECT * FROM receipts WHERE invoice_id = ? AND provider = ?", (clean_id, provider.strip()))
+    else:
+        cur = conn.execute("SELECT * FROM receipts WHERE invoice_id = ?", (clean_id,))
+    receipt = cur.fetchone()
+    if not receipt:
+        conn.close()
+        return None
+    receipt_dict = dict(receipt)
+    cur_items = conn.execute("SELECT * FROM receipt_items WHERE receipt_id = ? ORDER BY id ASC", (receipt_dict["id"],))
+    receipt_dict["items"] = [dict(item) for item in cur_items.fetchall()]
+    conn.close()
+    return receipt_dict
 
 
 def get_receipts(limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
