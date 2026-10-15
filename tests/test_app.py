@@ -237,4 +237,18 @@ def test_build_primary_api_request_opencode_responses_url():
     resp_data_2 = {"output": [{"content": [{"text": "{\"provider\": \"TestStore2\"}"}]}]}
     assert extract_text_from_api_response(resp_data_2) == "{\"provider\": \"TestStore2\"}"
 
+    # Test 4: Reasoning model with reasoning items followed by message item
+    resp_data_3 = {
+        "output": [
+            {"id": "rs_1", "type": "reasoning", "content": []},
+            {"id": "rs_2", "type": "reasoning", "content": []},
+            {
+                "id": "msg_1",
+                "type": "message",
+                "content": [{"type": "output_text", "text": "{\"provider\": \"Mercadona\"}"}]
+            }
+        ]
+    }
+    assert extract_text_from_api_response(resp_data_3) == "{\"provider\": \"Mercadona\"}"
+
 

@@ -672,9 +672,9 @@ async function loadSettings() {
   try {
     const res = await fetch('/api/settings');
     const s = await res.json();
-    document.getElementById('input-primary-base-url').value = s.primary_api_base_url || '';
+    document.getElementById('input-primary-base-url').value = s.primary_api_base_url || 'https://opencode.ai/inference/openai/v1/responses';
     document.getElementById('input-primary-key').value = s.primary_api_key || '';
-    document.getElementById('input-primary-model').value = s.primary_vision_model || 'gpt-4o-mini';
+    document.getElementById('input-primary-model').value = s.primary_vision_model || 'gpt-6-luna';
     document.getElementById('input-ollama-base-url').value = s.ollama_base_url || 'http://127.0.0.1:11434';
     document.getElementById('input-ollama-model').value = s.ollama_model || 'gemma4:e2b';
     document.getElementById('input-ollama-timeout').value = s.ollama_timeout_seconds || '180';

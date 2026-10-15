@@ -237,44 +237,70 @@ def extract_text_from_api_response(res_json: Any) -> str:
     # 1. Standard OpenAI Chat Completions: choices[0].message.content
     choices = res_json.get("choices")
     if choices and isinstance(choices, list) and len(choices) > 0:
-        msg = choices[0].get("message", {})
-        if isinstance(msg, dict) and "content" in msg:
-            content = msg["content"]
-            if isinstance(content, str):
-                return content
-            elif isinstance(content, list):
-                return "".join(part.get("text", "") for part in content if isinstance(part, dict))
+        for choice in choices:
+            if not isinstance(choice, dict):
+                continue
+            msg = choice.get("message", {})
+            if isinstance(msg, dict):
+                content = msg.get("content")
+                if isinstance(content, str) and content.strip():
+                    return content
+                elif isinstance(content, list):
+                    text = "".join(part.get("text", "") for part in content if isinstance(part, dict))
+                    if text.strip():
+                        return text
 
     # 2. OpenAI / OpenCode Responses API: output_text field
-    if "output_text" in res_json and isinstance(res_json["output_text"], str):
+    if "output_text" in res_json and isinstance(res_json["output_text"], str) and res_json["output_text"].strip():
         return res_json["output_text"]
 
-    # 3. Responses API: output list
+    # 3. Responses API: output list (supporting reasoning models with reasoning + message elements)
     output = res_json.get("output")
     if output:
-        if isinstance(output, str):
+        if isinstance(output, str) and output.strip():
             return output
         if isinstance(output, list) and len(output) > 0:
-            first_out = output[0]
-            if isinstance(first_out, dict):
-                content = first_out.get("content")
-                if isinstance(content, str):
+            # First look for an explicit message item (standard in Responses API)
+            for item in output:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("type") == "message" or item.get("role") == "assistant":
+                    content = item.get("content")
+                    if isinstance(content, str) and content.strip():
+                        return content
+                    if isinstance(content, list):
+                        text = "".join(part.get("text", "") for part in content if isinstance(part, dict))
+                        if text.strip():
+                            return text
+                    if "text" in item and isinstance(item["text"], str) and item["text"].strip():
+                        return item["text"]
+
+            # Fallback: check all items in output for non-empty text content
+            for item in output:
+                if not isinstance(item, dict):
+                    continue
+                content = item.get("content")
+                if isinstance(content, str) and content.strip():
                     return content
                 if isinstance(content, list):
-                    return "".join(part.get("text", "") for part in content if isinstance(part, dict))
-                if "text" in first_out:
-                    return str(first_out["text"])
+                    text = "".join(part.get("text", "") for part in content if isinstance(part, dict))
+                    if text.strip():
+                        return text
+                if "text" in item and isinstance(item["text"], str) and item["text"].strip():
+                    return item["text"]
 
     # 4. Anthropic style content
     content = res_json.get("content")
     if content:
-        if isinstance(content, str):
+        if isinstance(content, str) and content.strip():
             return content
         if isinstance(content, list):
-            return "".join(part.get("text", "") for part in content if isinstance(part, dict))
+            text = "".join(part.get("text", "") for part in content if isinstance(part, dict))
+            if text.strip():
+                return text
 
     # 5. Generic response field
-    if "response" in res_json:
+    if "response" in res_json and str(res_json["response"]).strip():
         return str(res_json["response"])
 
     raise ValueError(f"Unrecognized model response structure: {json.dumps(res_json)[:250]}")
@@ -282,9 +308,9 @@ def extract_text_from_api_response(res_json: Any) -> str:
 
 async def extract_via_primary_api(b64_image: str) -> Optional[Dict[str, Any]]:
     """Attempt extraction using the primary Copencode / OpenAI-compatible API."""
-    base_url = get_setting("PRIMARY_API_BASE_URL", os.environ.get("PRIMARY_API_BASE_URL", "")).strip()
+    base_url = get_setting("PRIMARY_API_BASE_URL", os.environ.get("PRIMARY_API_BASE_URL", "https://opencode.ai/inference/openai/v1/responses")).strip()
     api_key = get_setting("PRIMARY_API_KEY", os.environ.get("PRIMARY_API_KEY", "")).strip()
-    model = get_setting("PRIMARY_VISION_MODEL", os.environ.get("PRIMARY_VISION_MODEL", "gpt-4o-mini")).strip()
+    model = get_setting("PRIMARY_VISION_MODEL", os.environ.get("PRIMARY_VISION_MODEL", "gpt-6-luna")).strip()
 
     if not base_url and not api_key:
         return None
@@ -331,6 +357,14 @@ async def extract_via_primary_api(b64_image: str) -> Optional[Dict[str, Any]]:
             if retry_needed:
                 resp = await client.post(url, json=payload, headers=headers)
 
+        if resp.status_code >= 400:
+            try:
+                err_json = resp.json()
+                err_msg = err_json.get("error", {}).get("message", resp.text)
+            except Exception:
+                err_msg = resp.text
+            raise RuntimeError(f"Primary API returned HTTP {resp.status_code}: {err_msg}")
+
         resp.raise_for_status()
         res_json = resp.json()
         content = extract_text_from_api_response(res_json)
@@ -357,6 +391,14 @@ async def extract_via_ollama(b64_image: str) -> Dict[str, Any]:
 
     async with httpx.AsyncClient(timeout=timeout) as client:
         resp = await client.post(url, json=payload)
+        if resp.status_code >= 400:
+            try:
+                err_json = resp.json()
+                err_msg = err_json.get("error", resp.text)
+            except Exception:
+                err_msg = resp.text
+            raise RuntimeError(f"Ollama returned HTTP {resp.status_code}: {err_msg}")
+
         resp.raise_for_status()
         res_json = resp.json()
         content = res_json.get("response", "")
@@ -371,12 +413,14 @@ async def parse_receipt_image(filepath: str) -> Tuple[Dict[str, Any], str]:
     """
     b64_img = optimize_image_for_vision(filepath)
 
+    primary_err = None
     # 1. Try Primary API
     try:
         primary_res = await extract_via_primary_api(b64_img)
         if primary_res:
             return primary_res, "Primary API"
     except Exception as e:
+        primary_err = e
         print(f"[Extractor] Primary API failed ({e}), falling back to Ollama...")
 
     # 2. Local Ollama Fallback
@@ -385,4 +429,8 @@ async def parse_receipt_image(filepath: str) -> Tuple[Dict[str, Any], str]:
         return ollama_res, "Ollama Local (Gemma)"
     except Exception as e:
         print(f"[Extractor] Ollama fallback failed: {e}")
-        raise RuntimeError(f"All extraction methods failed. Ollama error: {e}")
+        err_msg = "All extraction methods failed."
+        if primary_err:
+            err_msg += f"\n• Primary API: {primary_err}"
+        err_msg += f"\n• Ollama: {e}"
+        raise RuntimeError(err_msg)

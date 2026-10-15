@@ -267,9 +267,9 @@ def list_providers():
 def get_settings():
     """Retrieve current system settings."""
     return {
-        "primary_api_base_url": get_setting("PRIMARY_API_BASE_URL", os.environ.get("PRIMARY_API_BASE_URL", "")),
+        "primary_api_base_url": get_setting("PRIMARY_API_BASE_URL", os.environ.get("PRIMARY_API_BASE_URL", "https://opencode.ai/inference/openai/v1/responses")),
         "primary_api_key": "***" if get_setting("PRIMARY_API_KEY", os.environ.get("PRIMARY_API_KEY", "")) else "",
-        "primary_vision_model": get_setting("PRIMARY_VISION_MODEL", os.environ.get("PRIMARY_VISION_MODEL", "gpt-4o-mini")),
+        "primary_vision_model": get_setting("PRIMARY_VISION_MODEL", os.environ.get("PRIMARY_VISION_MODEL", "gpt-6-luna")),
         "ollama_base_url": get_setting("OLLAMA_BASE_URL", os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")),
         "ollama_model": get_setting("OLLAMA_MODEL", os.environ.get("OLLAMA_MODEL", "gemma4:e2b")),
         "ollama_timeout_seconds": get_setting("OLLAMA_TIMEOUT_SECONDS", os.environ.get("OLLAMA_TIMEOUT_SECONDS", "180")),
@@ -297,13 +297,20 @@ def update_settings(payload: SettingsSchema):
 @app.post("/api/settings/test-primary")
 async def test_primary_api(payload: TestPrimaryApiSchema):
     """Test connection and inference with the configured Primary Vision API."""
-    base_url = (payload.base_url or get_setting("PRIMARY_API_BASE_URL", os.environ.get("PRIMARY_API_BASE_URL", "")) or "").strip()
+    if payload.base_url is not None:
+        base_url = payload.base_url.strip()
+    else:
+        base_url = (get_setting("PRIMARY_API_BASE_URL", os.environ.get("PRIMARY_API_BASE_URL", "https://opencode.ai/inference/openai/v1/responses")) or "").strip()
     
-    api_key = payload.api_key.strip() if payload.api_key else ""
-    if not api_key or api_key == "***":
+    if payload.api_key is not None and payload.api_key != "***":
+        api_key = payload.api_key.strip()
+    else:
         api_key = (get_setting("PRIMARY_API_KEY", os.environ.get("PRIMARY_API_KEY", "")) or "").strip()
         
-    model = (payload.model or get_setting("PRIMARY_VISION_MODEL", os.environ.get("PRIMARY_VISION_MODEL", "gpt-4o-mini")) or "gpt-4o-mini").strip()
+    if payload.model is not None and payload.model.strip():
+        model = payload.model.strip()
+    else:
+        model = (get_setting("PRIMARY_VISION_MODEL", os.environ.get("PRIMARY_VISION_MODEL", "gpt-6-luna")) or "gpt-6-luna").strip()
 
     if not base_url and not api_key:
         return {"success": False, "message": "Neither API Base URL nor API Key is provided or configured."}
