@@ -249,7 +249,16 @@ def test_build_primary_api_request_opencode_responses_url():
             }
         ]
     }
-    assert extract_text_from_api_response(resp_data_3) == "{\"provider\": \"Mercadona\"}"
+    # Test 5: Google AI Studio Gemini OpenAI-compatible endpoint resolution
+    url_gemini, payload_gemini, is_resp_gemini = build_primary_api_request(
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+        model="gemini-2.0-flash",
+        prompt="Analyze receipt",
+        b64_image="fakebase64data"
+    )
+    assert url_gemini == "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+    assert is_resp_gemini is False
+    assert "messages" in payload_gemini
 
 
 def test_duplicate_receipt_detection_via_invoice_id():

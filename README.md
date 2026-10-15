@@ -116,11 +116,11 @@ start.bat
 Copy `.env.example` to `.env` or configure directly within the **Settings** tab in the web dashboard:
 
 ```env
-# Primary Vision API (Copencode / OpenAI-compatible / OpenRouter)
+# Primary Vision API (Google AI Studio / OpenAI / OpenRouter / Copencode)
 # If left empty, the application automatically uses local Ollama fallback
-PRIMARY_API_BASE_URL=
-PRIMARY_API_KEY=
-PRIMARY_VISION_MODEL=gpt-4o-mini
+PRIMARY_API_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
+PRIMARY_API_KEY=AIzaSy...
+PRIMARY_VISION_MODEL=gemini-2.0-flash
 
 # Local Ollama Fallback
 OLLAMA_BASE_URL=http://127.0.0.1:11434
@@ -134,7 +134,7 @@ RECEIPTS_DIR=receipts
 DB_PATH=groceries.db
 ```
 
-> **Tip:** You can verify your connection anytime in the dashboard under **Settings** by clicking **`⚡ Test Primary API`** or **`🦙 Test Ollama`**.
+> **Tip:** Google AI Studio (Gemini) keys work out of the box using Google's official OpenAI-compatible endpoint: `https://generativelanguage.googleapis.com/v1beta/openai`. You can verify your connection anytime in the dashboard under **Settings** by clicking **`⚡ Test Primary API`** or **`🦙 Test Ollama`**.
 
 ---
 

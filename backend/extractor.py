@@ -163,7 +163,14 @@ def build_primary_api_request(base_url: str, model: str, prompt: str, b64_image:
     - Otherwise formats for standard OpenAI Chat Completions API.
     """
     clean_base = base_url.strip().rstrip('/')
-    
+
+    # Auto-adjust Google AI Studio base URL if /openai is omitted
+    if "generativelanguage.googleapis.com" in clean_base and "/openai" not in clean_base:
+        if clean_base.endswith("/v1beta") or clean_base.endswith("/v1"):
+            clean_base = f"{clean_base}/openai"
+        else:
+            clean_base = f"{clean_base}/v1beta/openai"
+
     if clean_base.endswith("/chat/completions") or clean_base.endswith("/responses") or clean_base.endswith("/messages"):
         url = clean_base
     elif "/responses" in clean_base or clean_base.endswith("/v1/responses"):
