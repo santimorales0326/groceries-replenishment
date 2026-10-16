@@ -701,9 +701,39 @@ function exportData(format) {
 // -------------------------------------------------------------
 // CONSUMPTION & REPLENISHMENT ESTIMATOR
 // -------------------------------------------------------------
+let collapsedReplenishCategories = new Set();
+
+function toggleReplenishCategoryCollapse(catName) {
+  if (collapsedReplenishCategories.has(catName)) {
+    collapsedReplenishCategories.delete(catName);
+  } else {
+    collapsedReplenishCategories.add(catName);
+  }
+  renderConsumptionView();
+}
+
+function expandAllReplenishCategories() {
+  collapsedReplenishCategories.clear();
+  renderConsumptionView();
+}
+
+function collapseAllReplenishCategories() {
+  const cats = new Set(consumptionData.map(i => i.category || 'Other'));
+  cats.forEach(c => collapsedReplenishCategories.add(c));
+  renderConsumptionView();
+}
+
+function getCategoryIcon(catName) {
+  const cats = categoriesList.length > 0 ? categoriesList : DEFAULT_CATEGORIES_LOCAL;
+  const found = cats.find(c => c.name.toLowerCase() === (catName || '').toLowerCase());
+  return found ? (found.icon || '📦') : '📦';
+}
+
 async function loadConsumption() {
-  const tbody = document.getElementById('tbody-consumption');
-  tbody.innerHTML = '<tr><td colspan="7" class="text-center">Calculating consumption and burn rates...</td></tr>';
+  const container = document.getElementById('consumption-categories-container');
+  if (container) {
+    container.innerHTML = '<div class="text-center" style="padding:24px; color:var(--text-muted);">Calculating consumption and burn rates...</div>';
+  }
 
   try {
     const res = await fetch('/api/consumption');
@@ -711,7 +741,9 @@ async function loadConsumption() {
     consumptionData = data.metrics || [];
     renderConsumptionView();
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="7" class="text-center" style="color:var(--accent-rose);">Error: ${err.message}</td></tr>`;
+    if (container) {
+      container.innerHTML = `<div class="text-center" style="padding:24px; color:var(--accent-rose);">Error: ${err.message}</div>`;
+    }
   }
 }
 
@@ -723,7 +755,9 @@ function filterConsumption(status, btn) {
 }
 
 function renderConsumptionView() {
-  const tbody = document.getElementById('tbody-consumption');
+  const container = document.getElementById('consumption-categories-container');
+  if (!container) return;
+
   const overdueCount = consumptionData.filter(i => i.status === 'overdue').length;
   const lowCount = consumptionData.filter(i => i.status === 'low').length;
   const okCount = consumptionData.filter(i => i.status === 'ok').length;
@@ -753,44 +787,133 @@ function renderConsumptionView() {
     summaryBox.innerHTML = `✅ All grocery items are sufficiently stocked based on your purchase trends.`;
   }
 
+  // Filter items by status
   let filtered = consumptionData;
   if (consumptionFilter !== 'all') {
     filtered = consumptionData.filter(i => i.status === consumptionFilter);
   }
 
+  // Filter items by text search
+  const searchQuery = (document.getElementById('filter-search-replenish')?.value || '').toLowerCase().trim();
+  if (searchQuery) {
+    filtered = filtered.filter(i => 
+      (i.clean_name || '').toLowerCase().includes(searchQuery) ||
+      (i.category || '').toLowerCase().includes(searchQuery)
+    );
+  }
+
   if (filtered.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No items in this replenishment category.</td></tr>';
+    container.innerHTML = `
+      <div class="section-card text-center" style="padding: 32px; color: var(--text-dim);">
+        No items match the selected filter${searchQuery ? ` ("${escapeHtml(searchQuery)}")` : ''}.
+      </div>
+    `;
     return;
   }
 
-  tbody.innerHTML = '';
+  // Group by category
+  const grouped = {};
   filtered.forEach(item => {
-    const tr = document.createElement('tr');
-    const badgeClass = item.status === 'overdue' ? 'badge-danger' : item.status === 'low' ? 'badge-warning' : 'badge-success';
-    tr.innerHTML = `
-      <td>
-        <strong>${escapeHtml(item.clean_name)}</strong>
-        <div style="font-size:11px; color:var(--text-dim);">${item.category} • Bought ${item.purchase_count}x</div>
-      </td>
-      <td><strong>${item.daily_consumption}</strong> ${item.unit}/day</td>
-      <td>${item.weekly_consumption} ${item.unit}/wk</td>
-      <td>${item.monthly_consumption} ${item.unit}/mo</td>
-      <td>
-        <strong>${item.estimated_stock_remaining}</strong> ${item.unit}
-        ${item.stock_source === 'audit' ? `
-          <div style="font-size:10px; color:#A5B4FC; margin-top:2px;" title="Grounded in Pantry Stock Audit on ${item.last_audit_date}">
-            📦 Audited (${item.last_audit_date})
-          </div>
-        ` : `
-          <div style="font-size:10px; color:var(--text-dim); margin-top:2px;">
-            🛒 Projected
-          </div>
-        `}
-      </td>
-      <td><strong>${item.estimated_days_left <= 0 ? '0 days' : `${item.estimated_days_left} d`}</strong></td>
-      <td><span class="badge ${badgeClass}">${item.status_text}</span></td>
+    const cat = item.category || 'Other';
+    if (!grouped[cat]) grouped[cat] = [];
+    grouped[cat].push(item);
+  });
+
+  // Sort categories: categories with overdue items first, then low items, then alphabetical
+  const sortedCategories = Object.keys(grouped).sort((a, b) => {
+    const aOverdue = grouped[a].filter(i => i.status === 'overdue').length;
+    const bOverdue = grouped[b].filter(i => i.status === 'overdue').length;
+    if (aOverdue !== bOverdue) return bOverdue - aOverdue;
+
+    const aLow = grouped[a].filter(i => i.status === 'low').length;
+    const bLow = grouped[b].filter(i => i.status === 'low').length;
+    if (aLow !== bLow) return bLow - aLow;
+
+    return a.localeCompare(b);
+  });
+
+  container.innerHTML = '';
+
+  sortedCategories.forEach(catName => {
+    const items = grouped[catName];
+    const isCollapsed = collapsedReplenishCategories.has(catName);
+    const catIcon = getCategoryIcon(catName);
+
+    const overdueInCat = items.filter(i => i.status === 'overdue').length;
+    const lowInCat = items.filter(i => i.status === 'low').length;
+
+    const card = document.createElement('div');
+    card.className = `stock-category-card ${isCollapsed ? 'is-collapsed' : ''}`;
+
+    card.innerHTML = `
+      <div class="cat-card-header" onclick="toggleReplenishCategoryCollapse('${escapeHtml(catName)}')">
+        <div class="cat-title-wrap">
+          <span class="cat-chevron" title="${isCollapsed ? 'Click to expand' : 'Click to collapse'}">▼</span>
+          <span style="font-size: 18px;">${catIcon}</span>
+          <h4>${escapeHtml(catName)}</h4>
+          <span class="cat-count-badge has-items">
+            ${items.length} ${items.length === 1 ? 'item' : 'items'}
+          </span>
+          ${overdueInCat > 0 ? `<span class="badge badge-danger" style="font-size: 10px; padding: 2px 7px;">⚠️ ${overdueInCat} Restock</span>` : ''}
+          ${lowInCat > 0 ? `<span class="badge badge-warning" style="font-size: 10px; padding: 2px 7px;">⚡ ${lowInCat} Low</span>` : ''}
+          ${isCollapsed ? `
+            <span class="cat-collapsed-summary">
+              (${items.length} items • ${overdueInCat > 0 ? `${overdueInCat} need restock` : lowInCat > 0 ? `${lowInCat} low` : 'all sufficient'})
+            </span>
+          ` : ''}
+        </div>
+      </div>
+      <div class="cat-card-body">
+        <div class="table-responsive">
+          <table class="data-table" style="font-size: 13px;">
+            <thead>
+              <tr>
+                <th style="width: 28%;">Item</th>
+                <th style="width: 12%;">Daily Burn</th>
+                <th style="width: 12%;">Weekly Burn</th>
+                <th style="width: 12%;">Monthly Burn</th>
+                <th style="width: 16%;">Stock Remaining</th>
+                <th style="width: 10%;">Days Left</th>
+                <th style="width: 10%;">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${items.map(item => {
+                const badgeClass = item.status === 'overdue' ? 'badge-danger' : item.status === 'low' ? 'badge-warning' : 'badge-success';
+                return `
+                  <tr>
+                    <td>
+                      <strong>${escapeHtml(item.clean_name)}</strong>
+                      <div style="font-size:11px; color:var(--text-dim); margin-top:2px;">
+                        ${item.purchase_count > 0 ? `Bought ${item.purchase_count}x • Last: ${item.last_purchase_date}` : 'Added via stock audit'}
+                      </div>
+                    </td>
+                    <td><strong>${item.daily_consumption}</strong> ${escapeHtml(item.unit)}/day</td>
+                    <td>${item.weekly_consumption} ${escapeHtml(item.unit)}/wk</td>
+                    <td>${item.monthly_consumption} ${escapeHtml(item.unit)}/mo</td>
+                    <td>
+                      <strong>${item.estimated_stock_remaining}</strong> ${escapeHtml(item.unit)}
+                      ${item.stock_source === 'audit' ? `
+                        <div style="font-size:10px; color:#A5B4FC; margin-top:2px;" title="Grounded in Pantry Stock Audit on ${item.last_audit_date}">
+                          📦 Audited (${item.last_audit_date})
+                        </div>
+                      ` : `
+                        <div style="font-size:10px; color:var(--text-dim); margin-top:2px;">
+                          🛒 Projected
+                        </div>
+                      `}
+                    </td>
+                    <td><strong>${item.estimated_days_left <= 0 ? '0 days' : `${item.estimated_days_left} d`}</strong></td>
+                    <td><span class="badge ${badgeClass}">${item.status_text}</span></td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
     `;
-    tbody.appendChild(tr);
+    container.appendChild(card);
   });
 }
 

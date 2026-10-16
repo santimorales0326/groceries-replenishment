@@ -235,33 +235,28 @@
           </div>
         </div>
 
-        <!-- Filter Pills -->
-        <div class="pill-filters">
-          <button class="pill active" onclick="filterConsumption('all', this)">All Items (<span id="count-all-c">0</span>)</button>
-          <button class="pill alert" onclick="filterConsumption('overdue', this)">Needs Restock (<span id="count-overdue-c">0</span>)</button>
-          <button class="pill warning" onclick="filterConsumption('low', this)">Running Low (<span id="count-low-c">0</span>)</button>
-          <button class="pill success" onclick="filterConsumption('ok', this)">Sufficient (<span id="count-ok-c">0</span>)</button>
+        <!-- Filter Pills & Controls -->
+        <div class="flex-between" style="flex-wrap: wrap; gap: 12px; margin-bottom: 20px;">
+          <div class="pill-filters">
+            <button class="pill active" onclick="filterConsumption('all', this)">All Items (<span id="count-all-c">0</span>)</button>
+            <button class="pill alert" onclick="filterConsumption('overdue', this)">Needs Restock (<span id="count-overdue-c">0</span>)</button>
+            <button class="pill warning" onclick="filterConsumption('low', this)">Running Low (<span id="count-low-c">0</span>)</button>
+            <button class="pill success" onclick="filterConsumption('ok', this)">Sufficient (<span id="count-ok-c">0</span>)</button>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <input type="text" id="filter-search-replenish" placeholder="🔍 Search items..." class="search-input input-compact" oninput="renderConsumptionView()">
+            <button type="button" class="btn btn-secondary btn-xs" onclick="expandAllReplenishCategories()" title="Expand all category cards">
+              ▼ Expand All
+            </button>
+            <button type="button" class="btn btn-secondary btn-xs" onclick="collapseAllReplenishCategories()" title="Collapse all category cards">
+              ▶ Collapse All
+            </button>
+          </div>
         </div>
 
-        <div class="section-card">
-          <div class="table-responsive">
-            <table class="data-table" id="table-consumption">
-              <thead>
-                <tr>
-                  <th>Item & Category</th>
-                  <th>Daily Burn</th>
-                  <th>Weekly Burn</th>
-                  <th>Monthly Burn</th>
-                  <th>Stock Remaining</th>
-                  <th>Days Left</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody id="tbody-consumption">
-                <tr><td colspan="7" class="text-center">Calculating consumption metrics...</td></tr>
-              </tbody>
-            </table>
-          </div>
+        <!-- Grouped Category Cards Container -->
+        <div id="consumption-categories-container" class="stock-categories-checklist">
+          <div class="text-center" style="padding: 24px; color: var(--text-muted);">Calculating consumption metrics...</div>
         </div>
       </section>
 
