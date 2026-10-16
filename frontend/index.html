@@ -368,7 +368,10 @@
               <input type="date" id="input-meta-date" required>
             </div>
             <div class="form-group">
-              <label for="input-meta-total">Total Amount (€):</label>
+              <div class="label-with-helper">
+                <label for="input-meta-total">Total Amount (€):</label>
+                <span id="meta-total-helper" class="meta-helper-pill" title="Live validation vs sum of line items"></span>
+              </div>
               <input type="number" step="0.01" id="input-meta-total" oninput="updateValidationSum()" required>
             </div>
             <div class="form-group">
@@ -377,38 +380,16 @@
             </div>
           </div>
 
-          <!-- Live Validation & Reconciliation Panel -->
-          <div id="reconciliation-panel" class="reconciliation-panel">
-            <div class="recon-metrics">
-              <div class="recon-card">
-                <span class="recon-label">Invoice Total</span>
-                <span class="recon-value" id="val-invoice-total">€0.00</span>
-              </div>
-              <div class="recon-operator">−</div>
-              <div class="recon-card">
-                <span class="recon-label">Items Sum (<span id="val-items-count">0</span> items)</span>
-                <span class="recon-value" id="val-items-sum">€0.00</span>
-              </div>
-              <div class="recon-operator">=</div>
-              <div class="recon-card highlight" id="recon-diff-card">
-                <span class="recon-label">Discrepancy</span>
-                <span class="recon-value" id="val-diff-amount">€0.00</span>
-              </div>
-            </div>
-
-            <div class="recon-status-row">
-              <div id="recon-status-pill" class="recon-pill match">
-                <span class="recon-pill-icon">✓</span>
-                <span id="recon-status-text">Totals match perfectly!</span>
-              </div>
-              <button type="button" id="btn-sync-total" class="btn btn-secondary btn-xs" onclick="syncInvoiceTotalWithItemsSum()" style="display:none;">
-                ⚡ Set Invoice Total to Items Sum
-              </button>
-            </div>
-          </div>
-
           <div class="items-editor-header flex-between">
-            <h4>Extracted Line Items (<span id="review-items-count">0</span>)</h4>
+            <div class="items-title-group">
+              <h4>Extracted Line Items (<span id="review-items-count">0</span>)</h4>
+              <div id="recon-inline-pill" class="recon-inline-pill match">
+                <span id="recon-inline-text">✓ Items match invoice</span>
+                <button type="button" id="btn-sync-total" class="btn-sync-inline" onclick="syncInvoiceTotalWithItemsSum()" style="display:none;" title="Set invoice total to match items sum">
+                  Use Items Sum
+                </button>
+              </div>
+            </div>
             <button type="button" class="btn btn-secondary btn-xs" onclick="addNewItemRow()">➕ Add Item</button>
           </div>
 

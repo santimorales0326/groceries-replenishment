@@ -386,50 +386,51 @@ function updateValidationSum() {
   const currency = document.getElementById('input-meta-currency')?.value || 'EUR';
   const sym = currency === 'EUR' ? '€' : `${currency} `;
 
-  const valInvEl = document.getElementById('val-invoice-total');
-  const valSumEl = document.getElementById('val-items-sum');
-  const valDiffEl = document.getElementById('val-diff-amount');
-  const valCountEl = document.getElementById('val-items-count');
+  const inlinePill = document.getElementById('recon-inline-pill');
+  const inlineText = document.getElementById('recon-inline-text');
+  const syncBtn = document.getElementById('btn-sync-total');
+  const metaHelper = document.getElementById('meta-total-helper');
   const tfootTotalEl = document.getElementById('tfoot-items-total');
   const tfootDiffEl = document.getElementById('tfoot-discrepancy-cell');
-  const statusPill = document.getElementById('recon-status-pill');
-  const syncBtn = document.getElementById('btn-sync-total');
-  const diffCard = document.getElementById('recon-diff-card');
 
-  if (valInvEl) valInvEl.textContent = `${sym}${invoiceTotal.toFixed(2)}`;
-  if (valSumEl) valSumEl.textContent = `${sym}${itemsSum.toFixed(2)}`;
-  if (valCountEl) valCountEl.textContent = (currentReviewData.items || []).length;
   if (tfootTotalEl) tfootTotalEl.textContent = `${sym}${itemsSum.toFixed(2)}`;
 
   if (absDiff < 0.009) {
-    if (valDiffEl) valDiffEl.textContent = `${sym}0.00`;
-    if (diffCard) diffCard.className = 'recon-card match';
-    if (statusPill) {
-      statusPill.className = 'recon-pill match';
-      statusPill.innerHTML = '<span class="recon-pill-icon">✓</span> <span>Totals match perfectly!</span>';
+    if (inlinePill) inlinePill.className = 'recon-inline-pill match';
+    if (inlineText) inlineText.textContent = `✓ Items match invoice (${sym}${itemsSum.toFixed(2)})`;
+    if (syncBtn) syncBtn.style.display = 'none';
+
+    if (metaHelper) {
+      metaHelper.style.display = 'none';
+      metaHelper.textContent = '';
     }
+
     if (tfootDiffEl) {
       tfootDiffEl.innerHTML = '<span class="badge badge-success">✓ Matches Invoice</span>';
     }
-    if (syncBtn) syncBtn.style.display = 'none';
   } else {
     const sign = diff > 0 ? '+' : '-';
     const diffStr = `${sign}${sym}${absDiff.toFixed(2)}`;
-    if (valDiffEl) valDiffEl.textContent = diffStr;
-    if (diffCard) diffCard.className = 'recon-card warning';
-    if (statusPill) {
-      statusPill.className = 'recon-pill warning';
-      const explanation = diff > 0
-        ? `Sum of items is ${sym}${absDiff.toFixed(2)} less than invoice total`
-        : `Sum of items is ${sym}${absDiff.toFixed(2)} more than invoice total`;
-      statusPill.innerHTML = `<span class="recon-pill-icon">⚠️</span> <span>Discrepancy: ${explanation}</span>`;
+
+    if (inlinePill) inlinePill.className = 'recon-inline-pill warning';
+    if (inlineText) {
+      inlineText.textContent = `⚠️ Items: ${sym}${itemsSum.toFixed(2)} vs Invoice: ${sym}${invoiceTotal.toFixed(2)} (Diff: ${diffStr})`;
     }
-    if (tfootDiffEl) {
-      tfootDiffEl.innerHTML = `<span class="badge badge-warning" title="${diff > 0 ? 'Items sum is lower than ticket' : 'Items sum is higher than ticket'}">⚠️ Diff: ${diffStr}</span>`;
-    }
+
     if (syncBtn) {
       syncBtn.style.display = 'inline-flex';
-      syncBtn.textContent = `⚡ Set Invoice Total to Items Sum (${sym}${itemsSum.toFixed(2)})`;
+      syncBtn.textContent = `⚡ Use ${sym}${itemsSum.toFixed(2)}`;
+      syncBtn.title = `Set invoice total to items sum (${sym}${itemsSum.toFixed(2)})`;
+    }
+
+    if (metaHelper) {
+      metaHelper.className = 'meta-helper-pill warning';
+      metaHelper.style.display = 'inline-block';
+      metaHelper.textContent = `Items: ${sym}${itemsSum.toFixed(2)} (${diffStr})`;
+    }
+
+    if (tfootDiffEl) {
+      tfootDiffEl.innerHTML = `<span class="badge badge-warning" title="${diff > 0 ? 'Items sum is lower than ticket' : 'Items sum is higher than ticket'}">⚠️ Diff: ${diffStr}</span>`;
     }
   }
 }
