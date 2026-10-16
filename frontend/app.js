@@ -775,7 +775,18 @@ function renderConsumptionView() {
       <td><strong>${item.daily_consumption}</strong> ${item.unit}/day</td>
       <td>${item.weekly_consumption} ${item.unit}/wk</td>
       <td>${item.monthly_consumption} ${item.unit}/mo</td>
-      <td>${item.estimated_stock_remaining} ${item.unit}</td>
+      <td>
+        <strong>${item.estimated_stock_remaining}</strong> ${item.unit}
+        ${item.stock_source === 'audit' ? `
+          <div style="font-size:10px; color:#A5B4FC; margin-top:2px;" title="Grounded in Pantry Stock Audit on ${item.last_audit_date}">
+            📦 Audited (${item.last_audit_date})
+          </div>
+        ` : `
+          <div style="font-size:10px; color:var(--text-dim); margin-top:2px;">
+            🛒 Projected
+          </div>
+        `}
+      </td>
       <td><strong>${item.estimated_days_left <= 0 ? '0 days' : `${item.estimated_days_left} d`}</strong></td>
       <td><span class="badge ${badgeClass}">${item.status_text}</span></td>
     `;

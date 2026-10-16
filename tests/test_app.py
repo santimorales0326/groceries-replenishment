@@ -495,5 +495,91 @@ def test_receipt_items_catalog_endpoint():
     assert milk["last_purchased"] == "2026-10-15"
 
 
+def test_stock_audit_affects_consumption_estimator():
+    # 1. Save receipt from 2026-10-01
+    receipt_payload = {
+        "filename": "milk_audit_test.jpg",
+        "provider": "Mercadona",
+        "receipt_date": "2026-10-01",
+        "total_amount": 6.00,
+        "items": [
+            {
+                "name": "LECHE ENTERA",
+                "clean_name": "Whole Milk 1L",
+                "quantity": 6.0,
+                "unit": "pack",
+                "unit_price": 1.00,
+                "total_price": 6.00,
+                "category": "Dairy & Eggs"
+            }
+        ]
+    }
+    client.post("/api/receipts/save", json=receipt_payload)
+
+    # 2. Before any stock audit, stock_source should be receipt_estimate
+    res1 = client.get("/api/consumption?reference_date=2026-10-05")
+    assert res1.status_code == 200
+    metrics1 = res1.json()["metrics"]
+    milk1 = next(m for m in metrics1 if m["clean_name"] == "Whole Milk 1L")
+    assert milk1["stock_source"] == "receipt_estimate"
+    assert milk1["last_audit_date"] is None
+
+    # 3. Record a stock audit on 2026-10-05 declaring Whole Milk 1L as 1 unit and 'low'
+    audit_payload = {
+        "audit_date": "2026-10-05",
+        "notes": "Pantry Audit Check",
+        "items": [
+            {
+                "item_name": "Whole Milk 1L",
+                "category": "Dairy & Eggs",
+                "quantity": 1.0,
+                "unit": "pack",
+                "status": "low",
+                "notes": "Only 1 carton left"
+            }
+        ]
+    }
+    client.post("/api/stock-audits", json=audit_payload)
+
+    # 4. As of 2026-10-05, consumption estimator should be grounded in the audit
+    res2 = client.get("/api/consumption?reference_date=2026-10-05")
+    assert res2.status_code == 200
+    metrics2 = res2.json()["metrics"]
+    milk2 = next(m for m in metrics2 if m["clean_name"] == "Whole Milk 1L")
+    assert milk2["stock_source"] == "audit"
+    assert milk2["last_audit_date"] == "2026-10-05"
+    assert milk2["estimated_stock_remaining"] == 1.0
+    assert milk2["status"] == "low"
+
+    # 5. Record a new audit declaring Whole Milk 1L as 0 qty and 'out_of_stock'
+    audit_payload_out = {
+        "audit_date": "2026-10-06",
+        "notes": "Pantry Check",
+        "items": [
+            {
+                "item_name": "Whole Milk 1L",
+                "category": "Dairy & Eggs",
+                "quantity": 0.0,
+                "unit": "pack",
+                "status": "out_of_stock",
+                "notes": "Finished this morning"
+            }
+        ]
+    }
+    client.post("/api/stock-audits", json=audit_payload_out)
+
+    # 6. Consumption estimator should immediately flag 'overdue' (Restock Needed) with 0 remaining
+    res3 = client.get("/api/consumption?reference_date=2026-10-06")
+    assert res3.status_code == 200
+    metrics3 = res3.json()["metrics"]
+    milk3 = next(m for m in metrics3 if m["clean_name"] == "Whole Milk 1L")
+    assert milk3["stock_source"] == "audit"
+    assert milk3["estimated_stock_remaining"] == 0.0
+    assert milk3["estimated_days_left"] == 0.0
+    assert milk3["status"] == "overdue"
+    assert milk3["status_text"] == "Restock Needed"
+
+
+
 
 
