@@ -30,3 +30,8 @@ Thumbs.db
 temp/
 scratch/
 .pytest_cache/
+
+# Receipts directory (ignore user photos, keep folder)
+receipts/*
+!receipts/.gitkeep
+

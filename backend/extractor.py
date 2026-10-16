@@ -74,23 +74,68 @@ def optimize_image_for_vision(filepath: str, max_dimension: int = 1400, quality:
 
 
 def clean_json_response(text: str) -> Dict[str, Any]:
-    """Parse JSON out of raw model response, handling markdown fences or leading/trailing text."""
+    """Parse JSON out of raw model response, handling markdown fences, trailing commas, missing delimiters, or truncated stream."""
     text = text.strip()
     # Check for markdown code fences
     fence_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
     if fence_match:
         text = fence_match.group(1).strip()
 
-    # Find first { and last }
     first_brace = text.find("{")
-    last_brace = text.rfind("}")
-    if first_brace != -1 and last_brace != -1:
-        text = text[first_brace : last_brace + 1]
+    if first_brace != -1:
+        text = text[first_brace:]
 
+    # 1. Direct parse attempt
+    data = None
     try:
         data = json.loads(text)
-    except Exception as e:
-        # Fallback regex repair for common JSON trailing comma errors
+    except Exception:
+        pass
+
+    # 2. Heuristic formatting repairs (trailing commas, missing commas between objects/keys)
+    if data is None:
+        cleaned = text
+        # Remove trailing commas before } or ]
+        cleaned = re.sub(r",\s*([\]}])", r"\1", cleaned)
+        # Fix missing comma between objects in array: } \n { -> }, {
+        cleaned = re.sub(r"}\s*\n\s*{", "},\n{", cleaned)
+        # Fix missing comma between array string elements: " \n " -> ", "
+        cleaned = re.sub(r'"\s*\n\s*"', '",\n"', cleaned)
+        # Fix missing comma after value before next key: "foo": 1.2 \n "bar": 3
+        cleaned = re.sub(r'((?:true|false|null|[\d\.\-]+|"[^"\\]*(?:\\.[^"\\]*)*"))\s*\n\s*("[\w_]+"\s*:)', r'\1,\n\2', cleaned)
+
+        # Remove trailing text after last }
+        last_brace = cleaned.rfind("}")
+        if last_brace != -1:
+            try_text = cleaned[:last_brace + 1]
+            try:
+                data = json.loads(try_text)
+            except Exception:
+                pass
+
+    # 3. Truncated JSON recovery (if model hit max token limit mid-generation)
+    if data is None:
+        last_item = text.rfind("}")
+        if last_item != -1:
+            attempt = text[:last_item + 1].strip()
+            # If items array was opened with [ but not closed with ], close it
+            last_bracket = attempt.rfind("[")
+            if last_bracket != -1 and "]" not in attempt[last_bracket:]:
+                attempt += "\n]"
+            # Close open object braces
+            open_braces = attempt.count("{") - attempt.count("}")
+            if open_braces > 0:
+                attempt += "\n" + ("}" * open_braces)
+            attempt = re.sub(r",\s*([\]}])", r"\1", attempt)
+            attempt = re.sub(r"}\s*\n\s*{", "},\n{", attempt)
+            try:
+                data = json.loads(attempt)
+                print(f"[Extractor] Successfully recovered truncated JSON with {len(data.get('items', []))} items")
+            except Exception:
+                pass
+
+    # 4. Final attempt: re-raise json.loads if all recoveries fail
+    if data is None:
         repaired = re.sub(r",\s*([\]}])", r"\1", text)
         data = json.loads(repaired)
 
@@ -197,7 +242,8 @@ def build_primary_api_request(base_url: str, model: str, prompt: str, b64_image:
                             }
                         ]
                     }
-                ]
+                ],
+                "max_output_tokens": 8192
             }
         else:
             payload = {
@@ -225,7 +271,7 @@ def build_primary_api_request(base_url: str, model: str, prompt: str, b64_image:
                         ]
                     }
                 ],
-                "max_tokens": 2048
+                "max_tokens": 8192
             }
             if not is_reasoning_model:
                 payload["temperature"] = 0.1
@@ -399,7 +445,7 @@ async def extract_via_ollama(b64_image: str) -> Dict[str, Any]:
         "stream": False,
         "options": {
             "temperature": 0.1,
-            "num_predict": 2048
+            "num_predict": 8192
         }
     }
 

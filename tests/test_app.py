@@ -67,6 +67,60 @@ def test_clean_json_response_with_markdown_fences():
     assert cleaned["items"][1]["category"] == "Produce & Fresh"
 
 
+def test_clean_json_response_with_missing_commas_and_glitches():
+    # LLM output with missing comma between objects and trailing comma
+    glitched_response = """
+    {
+      "provider": "Mercadona",
+      "receipt_date": "2026-10-16",
+      "items": [
+        {
+          "name": "Item 1",
+          "quantity": 1,
+          "total_price": 2.50
+        }
+        {
+          "name": "Item 2",
+          "quantity": 2,
+          "total_price": 5.00,
+        }
+      ]
+    }
+    """
+    cleaned = clean_json_response(glitched_response)
+    assert cleaned["provider"] == "Mercadona"
+    assert len(cleaned["items"]) == 2
+
+
+def test_clean_json_response_truncated_stream_recovery():
+    # Model hit max tokens and was cut off mid-stream
+    truncated_response = """
+    {
+      "provider": "Mercadona",
+      "receipt_date": "2026-10-16",
+      "items": [
+        {
+          "name": "Item 1",
+          "quantity": 1,
+          "total_price": 2.50
+        },
+        {
+          "name": "Item 2",
+          "quantity": 2,
+          "total_price": 5.00
+        },
+        {
+          "name": "Item 3",
+          "quantity": 1,
+          "total_price
+    """
+    cleaned = clean_json_response(truncated_response)
+    assert cleaned["provider"] == "Mercadona"
+    # Should safely recover the 2 complete items before the cutoff
+    assert len(cleaned["items"]) == 2
+    assert cleaned["items"][1]["name"] == "Item 2"
+
+
 def test_database_crud_and_endpoints():
     # 1. Test saving receipt
     payload = {
