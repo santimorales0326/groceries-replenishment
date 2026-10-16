@@ -283,6 +283,7 @@ function openReviewModal(data, engine = 'AI Engine', duplicateOf = null) {
   document.getElementById('input-meta-currency').value = data.currency || 'EUR';
 
   renderReviewItemsTable();
+  updateValidationSum();
   document.getElementById('modal-review').style.display = 'flex';
 }
 
@@ -338,12 +339,14 @@ function updateReviewItem(index, field, value) {
 
   // Auto calculate total if qty or unit price changes
   if (field === 'quantity' || field === 'unit_price') {
-    const q = currentReviewData.items[index].quantity || 1.0;
-    const p = currentReviewData.items[index].unit_price || 0.0;
+    const q = parseFloat(currentReviewData.items[index].quantity) || 1.0;
+    const p = parseFloat(currentReviewData.items[index].unit_price) || 0.0;
     currentReviewData.items[index].total_price = Math.round(q * p * 100) / 100;
     renderReviewItemsTable();
-    recalculateReceiptTotal();
+  } else if (field === 'total_price') {
+    currentReviewData.items[index].total_price = parseFloat(value) || 0.0;
   }
+  updateValidationSum();
 }
 
 function addNewItemRow() {
@@ -358,17 +361,86 @@ function addNewItemRow() {
     category: 'Other'
   });
   renderReviewItemsTable();
+  updateValidationSum();
 }
 
 function removeReviewItem(index) {
   currentReviewData.items.splice(index, 1);
   renderReviewItemsTable();
-  recalculateReceiptTotal();
+  updateValidationSum();
 }
 
-function recalculateReceiptTotal() {
-  const sum = (currentReviewData.items || []).reduce((acc, curr) => acc + (parseFloat(curr.total_price) || 0), 0);
-  document.getElementById('input-meta-total').value = sum.toFixed(2);
+function calculateItemsSum() {
+  if (!currentReviewData || !currentReviewData.items) return 0;
+  return currentReviewData.items.reduce((sum, item) => sum + (parseFloat(item.total_price) || 0), 0);
+}
+
+function updateValidationSum() {
+  if (!currentReviewData) return;
+  const itemsSum = calculateItemsSum();
+  const invoiceTotalInput = document.getElementById('input-meta-total');
+  const invoiceTotal = parseFloat(invoiceTotalInput?.value) || 0;
+  const diff = Math.round((invoiceTotal - itemsSum) * 100) / 100;
+  const absDiff = Math.abs(diff);
+
+  const currency = document.getElementById('input-meta-currency')?.value || 'EUR';
+  const sym = currency === 'EUR' ? '€' : `${currency} `;
+
+  const valInvEl = document.getElementById('val-invoice-total');
+  const valSumEl = document.getElementById('val-items-sum');
+  const valDiffEl = document.getElementById('val-diff-amount');
+  const valCountEl = document.getElementById('val-items-count');
+  const tfootTotalEl = document.getElementById('tfoot-items-total');
+  const tfootDiffEl = document.getElementById('tfoot-discrepancy-cell');
+  const statusPill = document.getElementById('recon-status-pill');
+  const syncBtn = document.getElementById('btn-sync-total');
+  const diffCard = document.getElementById('recon-diff-card');
+
+  if (valInvEl) valInvEl.textContent = `${sym}${invoiceTotal.toFixed(2)}`;
+  if (valSumEl) valSumEl.textContent = `${sym}${itemsSum.toFixed(2)}`;
+  if (valCountEl) valCountEl.textContent = (currentReviewData.items || []).length;
+  if (tfootTotalEl) tfootTotalEl.textContent = `${sym}${itemsSum.toFixed(2)}`;
+
+  if (absDiff < 0.009) {
+    if (valDiffEl) valDiffEl.textContent = `${sym}0.00`;
+    if (diffCard) diffCard.className = 'recon-card match';
+    if (statusPill) {
+      statusPill.className = 'recon-pill match';
+      statusPill.innerHTML = '<span class="recon-pill-icon">✓</span> <span>Totals match perfectly!</span>';
+    }
+    if (tfootDiffEl) {
+      tfootDiffEl.innerHTML = '<span class="badge badge-success">✓ Matches Invoice</span>';
+    }
+    if (syncBtn) syncBtn.style.display = 'none';
+  } else {
+    const sign = diff > 0 ? '+' : '-';
+    const diffStr = `${sign}${sym}${absDiff.toFixed(2)}`;
+    if (valDiffEl) valDiffEl.textContent = diffStr;
+    if (diffCard) diffCard.className = 'recon-card warning';
+    if (statusPill) {
+      statusPill.className = 'recon-pill warning';
+      const explanation = diff > 0
+        ? `Sum of items is ${sym}${absDiff.toFixed(2)} less than invoice total`
+        : `Sum of items is ${sym}${absDiff.toFixed(2)} more than invoice total`;
+      statusPill.innerHTML = `<span class="recon-pill-icon">⚠️</span> <span>Discrepancy: ${explanation}</span>`;
+    }
+    if (tfootDiffEl) {
+      tfootDiffEl.innerHTML = `<span class="badge badge-warning" title="${diff > 0 ? 'Items sum is lower than ticket' : 'Items sum is higher than ticket'}">⚠️ Diff: ${diffStr}</span>`;
+    }
+    if (syncBtn) {
+      syncBtn.style.display = 'inline-flex';
+      syncBtn.textContent = `⚡ Set Invoice Total to Items Sum (${sym}${itemsSum.toFixed(2)})`;
+    }
+  }
+}
+
+function syncInvoiceTotalWithItemsSum() {
+  const sum = calculateItemsSum();
+  const input = document.getElementById('input-meta-total');
+  if (input) {
+    input.value = sum.toFixed(2);
+    updateValidationSum();
+  }
 }
 
 // Confirm & Save
