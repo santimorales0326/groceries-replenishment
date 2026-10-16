@@ -178,9 +178,16 @@ async function loadReceiptFiles() {
               <span>${file.modified_at}</span>
             </div>
             ${isSaved ? `
-              <div style="margin-top:6px; font-size:12px; color:#10B981;">
-                <strong>${file.provider || 'Saved Store'}</strong> • €${(file.total_amount || 0).toFixed(2)} (${file.item_count} items)
-                ${file.invoice_id ? ` • <span style="color:#64748B;">ID: ${escapeHtml(file.invoice_id)}</span>` : ''}
+              <div class="file-saved-meta">
+                <div class="file-saved-line">
+                  <strong>${escapeHtml(file.provider || 'Saved Store')}</strong> • €${(file.total_amount || 0).toFixed(2)} (${file.item_count} items)
+                </div>
+                ${file.invoice_id ? `
+                  <div class="file-invoice-line">
+                    <span class="file-invoice-label">Invoice:</span>
+                    <code class="invoice-pill">${escapeHtml(file.invoice_id)}</code>
+                  </div>
+                ` : ''}
               </div>
             ` : ''}
           </div>
@@ -408,7 +415,7 @@ async function loadSavedReceipts() {
     savedReceipts = data.receipts || [];
     renderSavedReceiptsTable();
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="6" class="text-center" style="color:var(--accent-rose);">Failed to load receipts: ${err.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center" style="color:var(--accent-rose);">Failed to load receipts: ${err.message}</td></tr>`;
   }
 }
 
@@ -418,11 +425,12 @@ function renderSavedReceiptsTable() {
 
   const filtered = savedReceipts.filter(r => {
     return (r.provider || '').toLowerCase().includes(search) ||
-           (r.receipt_date || '').toLowerCase().includes(search);
+           (r.receipt_date || '').toLowerCase().includes(search) ||
+           (r.invoice_id || '').toLowerCase().includes(search);
   });
 
   if (filtered.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No saved receipts found.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No saved receipts found.</td></tr>';
     return;
   }
 
@@ -430,8 +438,9 @@ function renderSavedReceiptsTable() {
   filtered.forEach(r => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td><strong>${r.receipt_date}</strong></td>
-      <td><span class="badge badge-info">${escapeHtml(r.provider)}</span></td>
+      <td><strong>${escapeHtml(r.receipt_date || '')}</strong></td>
+      <td>${r.invoice_id ? `<code class="invoice-pill">${escapeHtml(r.invoice_id)}</code>` : '<span class="text-dim">—</span>'}</td>
+      <td><span class="badge badge-info">${escapeHtml(r.provider || 'Unknown Store')}</span></td>
       <td>${r.item_count || 0} items</td>
       <td><strong>€${(r.total_amount || 0).toFixed(2)}</strong></td>
       <td><span class="badge badge-success">Confirmed</span></td>

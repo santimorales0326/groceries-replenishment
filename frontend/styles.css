@@ -443,6 +443,43 @@ body {
   color: var(--text-dim);
 }
 
+.file-saved-meta {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.file-saved-line {
+  color: #10B981;
+}
+
+.file-invoice-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.file-invoice-label {
+  color: var(--text-dim);
+}
+
+.invoice-pill {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 11px;
+  font-weight: 500;
+  background: rgba(99, 102, 241, 0.12);
+  color: #A5B4FC;
+  border: 1px solid rgba(99, 102, 241, 0.28);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  display: inline-block;
+  letter-spacing: -0.01em;
+}
+
 .file-actions {
   display: flex;
   justify-content: space-between;

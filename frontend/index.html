@@ -109,13 +109,14 @@
               <h3>Saved Grocery Receipts</h3>
               <span class="text-muted">History of parsed and confirmed shopping trips</span>
             </div>
-            <input type="text" id="receipts-search" placeholder="Search provider or date..." class="search-input" oninput="renderSavedReceiptsTable()">
+            <input type="text" id="receipts-search" placeholder="Search provider, date, or invoice ID..." class="search-input" oninput="renderSavedReceiptsTable()">
           </div>
           <div class="table-responsive">
             <table class="data-table" id="table-saved-receipts">
               <thead>
                 <tr>
                   <th>Date</th>
+                  <th>Invoice ID</th>
                   <th>Supermarket</th>
                   <th>Items</th>
                   <th>Total Cost</th>
@@ -124,7 +125,7 @@
                 </tr>
               </thead>
               <tbody id="tbody-saved-receipts">
-                <tr><td colspan="6" class="text-center">Loading receipts...</td></tr>
+                <tr><td colspan="7" class="text-center">Loading receipts...</td></tr>
               </tbody>
             </table>
           </div>
