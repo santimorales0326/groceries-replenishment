@@ -84,6 +84,28 @@ def init_db():
             )
         """)
 
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS stock_audits (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                audit_date TEXT NOT NULL,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS stock_audit_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                audit_id INTEGER NOT NULL REFERENCES stock_audits(id) ON DELETE CASCADE,
+                category TEXT NOT NULL,
+                item_name TEXT NOT NULL,
+                quantity REAL NOT NULL DEFAULT 0.0,
+                unit TEXT DEFAULT 'unit',
+                status TEXT DEFAULT 'in_stock',
+                notes TEXT
+            )
+        """)
+
         # Seed categories if empty
         cur = conn.execute("SELECT COUNT(*) FROM categories")
         if cur.fetchone()[0] == 0:
@@ -251,6 +273,27 @@ def get_distinct_providers() -> List[str]:
     return rows
 
 
+def get_parsed_receipt_items() -> List[Dict[str, Any]]:
+    conn = get_db_connection()
+    cur = conn.execute("""
+        SELECT 
+            i.category,
+            i.clean_name as item_name,
+            i.unit,
+            COUNT(i.id) as times_bought,
+            MAX(r.receipt_date) as last_purchased,
+            ROUND(AVG(i.quantity), 1) as avg_quantity
+        FROM receipt_items i
+        JOIN receipts r ON i.receipt_id = r.id
+        WHERE i.clean_name IS NOT NULL AND TRIM(i.clean_name) != ''
+        GROUP BY i.category, i.clean_name
+        ORDER BY i.category ASC, i.clean_name ASC
+    """)
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return rows
+
+
 def get_setting(key: str, default: Optional[str] = None) -> Optional[str]:
     conn = get_db_connection()
     cur = conn.execute("SELECT value FROM app_settings WHERE key = ?", (key,))
@@ -264,3 +307,83 @@ def set_setting(key: str, value: str):
     with conn:
         conn.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)", (key, value))
     conn.close()
+
+
+def save_stock_audit(audit_date: str, notes: str, items: List[Dict[str, Any]]) -> int:
+    conn = get_db_connection()
+    with conn:
+        cur = conn.execute(
+            "INSERT INTO stock_audits (audit_date, notes) VALUES (?, ?)",
+            (audit_date, notes)
+        )
+        audit_id = cur.lastrowid
+        for item in items:
+            item_name = str(item.get("item_name", "")).strip()
+            if not item_name:
+                continue
+            category = str(item.get("category", "Other")).strip()
+            try:
+                qty = float(item.get("quantity", 0.0))
+            except (ValueError, TypeError):
+                qty = 0.0
+            unit = str(item.get("unit", "unit")).strip()
+            status = str(item.get("status", "in_stock")).strip()
+            item_notes = str(item.get("notes", "")).strip()
+            conn.execute("""
+                INSERT INTO stock_audit_items (audit_id, category, item_name, quantity, unit, status, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (audit_id, category, item_name, qty, unit, status, item_notes))
+    conn.close()
+    return audit_id
+
+
+def get_stock_audits() -> List[Dict[str, Any]]:
+    conn = get_db_connection()
+    cur = conn.execute("""
+        SELECT a.id, a.audit_date, a.notes, a.created_at,
+               COUNT(i.id) as item_count,
+               COUNT(DISTINCT i.category) as category_count,
+               SUM(CASE WHEN i.status = 'in_stock' THEN 1 ELSE 0 END) as in_stock_count,
+               SUM(CASE WHEN i.status = 'low' THEN 1 ELSE 0 END) as low_stock_count,
+               SUM(CASE WHEN i.status = 'out_of_stock' THEN 1 ELSE 0 END) as out_of_stock_count
+        FROM stock_audits a
+        LEFT JOIN stock_audit_items i ON a.id = i.audit_id
+        GROUP BY a.id
+        ORDER BY a.audit_date DESC, a.id DESC
+    """)
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return rows
+
+
+def get_stock_audit(audit_id: int) -> Optional[Dict[str, Any]]:
+    conn = get_db_connection()
+    cur = conn.execute("SELECT * FROM stock_audits WHERE id = ?", (audit_id,))
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        return None
+    audit = dict(row)
+    cur_items = conn.execute("SELECT * FROM stock_audit_items WHERE audit_id = ? ORDER BY category ASC, item_name ASC", (audit_id,))
+    audit["items"] = [dict(item) for item in cur_items.fetchall()]
+    conn.close()
+    return audit
+
+
+def get_latest_stock_audit() -> Optional[Dict[str, Any]]:
+    conn = get_db_connection()
+    cur = conn.execute("SELECT id FROM stock_audits ORDER BY audit_date DESC, id DESC LIMIT 1")
+    row = cur.fetchone()
+    conn.close()
+    if not row:
+        return None
+    return get_stock_audit(row["id"])
+
+
+def delete_stock_audit(audit_id: int) -> bool:
+    conn = get_db_connection()
+    with conn:
+        conn.execute("DELETE FROM stock_audits WHERE id = ?", (audit_id,))
+    conn.close()
+    return True
+

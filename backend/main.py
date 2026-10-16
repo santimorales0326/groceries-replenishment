@@ -26,6 +26,12 @@ from backend.db import (
     get_distinct_providers,
     get_setting,
     set_setting,
+    save_stock_audit,
+    get_stock_audits,
+    get_stock_audit,
+    get_latest_stock_audit,
+    delete_stock_audit,
+    get_parsed_receipt_items,
 )
 from backend.extractor import (
     parse_receipt_image,
@@ -89,6 +95,21 @@ class ReceiptSaveSchema(BaseModel):
     status: str = "confirmed"
     items: List[ItemSchema] = []
     raw_json: Optional[Dict[str, Any]] = None
+
+
+class StockAuditItemSchema(BaseModel):
+    category: str
+    item_name: str
+    quantity: float = 0.0
+    unit: str = "unit"
+    status: str = "in_stock"
+    notes: Optional[str] = ""
+
+
+class StockAuditSaveSchema(BaseModel):
+    audit_date: str
+    notes: Optional[str] = ""
+    items: List[StockAuditItemSchema] = []
 
 
 class SettingsSchema(BaseModel):
@@ -285,6 +306,56 @@ def get_consumption(reference_date: Optional[str] = None):
     """Calculate daily, weekly, monthly consumption rates and replenishment projection."""
     metrics = calculate_consumption_metrics(reference_date=reference_date)
     return {"metrics": metrics}
+
+
+# -------------------------------------------------------------
+# STOCK AUDITS (PERIODIC PANTRY INVENTORY)
+# -------------------------------------------------------------
+@app.get("/api/stock-audits")
+def list_stock_audits():
+    """Retrieve all recorded periodic stock audits with summary metrics."""
+    return {"audits": get_stock_audits()}
+
+
+@app.get("/api/stock-audits/latest")
+def retrieve_latest_stock_audit():
+    """Retrieve the most recent stock audit report with items."""
+    latest = get_latest_stock_audit()
+    return {"audit": latest}
+
+
+@app.get("/api/stock-audits/{audit_id}")
+def retrieve_stock_audit(audit_id: int):
+    """Retrieve a specific stock audit by ID."""
+    audit = get_stock_audit(audit_id)
+    if not audit:
+        raise HTTPException(status_code=404, detail=f"Stock audit {audit_id} not found")
+    return {"audit": audit}
+
+
+@app.post("/api/stock-audits")
+def create_stock_audit(payload: StockAuditSaveSchema):
+    """Save a periodic stock audit report."""
+    try:
+        items = [i.model_dump() for i in payload.items]
+        audit_id = save_stock_audit(payload.audit_date, payload.notes or "", items)
+        return {"success": True, "audit_id": audit_id, "message": "Stock audit recorded successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to record stock audit: {str(e)}")
+
+
+@app.delete("/api/stock-audits/{audit_id}")
+def remove_stock_audit(audit_id: int):
+    """Delete a recorded stock audit."""
+    delete_stock_audit(audit_id)
+    return {"success": True, "message": "Stock audit deleted"}
+
+
+@app.get("/api/receipt-items/catalog")
+def get_receipt_items_catalog():
+    """Retrieve all unique items parsed from receipts, categorized and with purchase history."""
+    return {"items": get_parsed_receipt_items()}
+
 
 
 @app.get("/api/categories")

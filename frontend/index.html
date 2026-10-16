@@ -44,6 +44,10 @@
           <span class="label">Consumption Estimator</span>
           <span id="badge-restock" class="nav-badge alert" style="display:none;">0</span>
         </button>
+        <button id="nav-stock" class="nav-item" onclick="switchTab('stock')">
+          <span class="icon">📦</span>
+          <span class="label">Pantry Stock</span>
+        </button>
         <button id="nav-settings" class="nav-item" onclick="switchTab('settings')">
           <span class="icon">⚙️</span>
           <span class="label">Settings</span>
@@ -261,7 +265,128 @@
         </div>
       </section>
 
-      <!-- TAB 5: SETTINGS -->
+      <!-- TAB 5: PANTRY STOCK AUDIT -->
+      <section id="view-stock" class="tab-view">
+        <!-- Stock Control Bar -->
+        <div class="section-card stock-control-card">
+          <div class="stock-header-row">
+            <div class="stock-meta-inputs">
+              <div class="form-group inline-form-group">
+                <label for="input-audit-date">Audit Date:</label>
+                <input type="date" id="input-audit-date" class="input-compact" required>
+              </div>
+              <div class="form-group inline-form-group flex-1">
+                <label for="input-audit-notes">Audit Notes:</label>
+                <input type="text" id="input-audit-notes" class="input-compact" placeholder="e.g. Weekly pantry count, fridge restock check...">
+              </div>
+            </div>
+            <div class="stock-action-buttons">
+              <button type="button" class="btn btn-secondary btn-sm" onclick="populateChecklistFromReceiptCatalog(true)" title="Pre-fill checklist with all unique items parsed from your receipts">
+                📦 Pre-fill from Receipts
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="loadPreviousAuditIntoChecklist()" title="Pre-fill checklist with items from your last audit report">
+                📋 Load Last Audit
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="clearStockChecklist()" title="Reset checklist and remove all item rows">
+                🧹 Clear Items
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="clearAllStockQuantities()" title="Set quantities to zero for all loaded items">
+                0️⃣ Clear Quantities
+              </button>
+              <button type="button" class="btn btn-primary btn-sm" id="btn-save-stock-audit" onclick="saveStockAuditReport()">
+                💾 Record Stock Report
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Live Audit Stats Ribbon -->
+        <div class="stats-ribbon stock-stats-ribbon">
+          <div class="stat-card">
+            <span class="stat-label">Items Counted</span>
+            <span class="stat-value" id="stat-stock-total-items">0</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Categories Tracked</span>
+            <span class="stat-value" id="stat-stock-categories">0</span>
+          </div>
+          <div class="stat-card success">
+            <span class="stat-label">In Stock</span>
+            <span class="stat-value success" id="stat-stock-in-stock">0</span>
+          </div>
+          <div class="stat-card warning">
+            <span class="stat-label">Running Low</span>
+            <span class="stat-value warning" id="stat-stock-low">0</span>
+          </div>
+          <div class="stat-card alert">
+            <span class="stat-label">Out of Stock</span>
+            <span class="stat-value alert" id="stat-stock-out">0</span>
+          </div>
+        </div>
+
+        <!-- Category Checklist Container -->
+        <div class="section-card">
+          <div class="card-header flex-between">
+            <div>
+              <h3>Pantry Inventory by Category</h3>
+              <span class="text-muted">Item names are pre-filled from your parsed receipts. Simply adjust stock status and quantities without typing.</span>
+            </div>
+            <div class="stock-quick-actions" style="display:flex; align-items:center; gap:8px;">
+              <input type="text" id="stock-filter-items" placeholder="🔍 Search items (e.g. milk, eggs)..." class="search-input input-compact" oninput="filterStockChecklistView()">
+              <button type="button" class="btn btn-secondary btn-xs" onclick="expandAllStockCategories()" title="Expand all category sections">
+                ▼ Expand All
+              </button>
+              <button type="button" class="btn btn-secondary btn-xs" onclick="collapseAllStockCategories()" title="Collapse all category sections">
+                ▶ Collapse All
+              </button>
+            </div>
+          </div>
+
+          <!-- Category Quick Filter Pills -->
+          <div class="pill-filters" id="stock-category-pills" style="margin-bottom: 16px;">
+            <!-- Dynamically populated category chips -->
+          </div>
+
+          <datalist id="datalist-parsed-items">
+            <!-- Dynamically populated with all parsed receipt item names -->
+          </datalist>
+
+          <div id="stock-categories-checklist" class="stock-categories-checklist">
+            <!-- Dynamically populated category cards -->
+          </div>
+        </div>
+
+        <!-- Past Periodic Reports History -->
+        <div class="section-card">
+          <div class="card-header flex-between">
+            <div>
+              <h3>Periodic Stock Audit History</h3>
+              <span class="text-muted">Archive of past stock levels and pantry snapshots</span>
+            </div>
+            <button type="button" class="btn btn-secondary btn-xs" onclick="loadStockAuditsHistory()">🔄 Refresh History</button>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table" id="table-stock-history">
+              <thead>
+                <tr>
+                  <th>Audit Date</th>
+                  <th>Recorded On</th>
+                  <th>Items Counted</th>
+                  <th>Categories</th>
+                  <th>Stock Breakdown</th>
+                  <th>Notes</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="tbody-stock-history">
+                <tr><td colspan="7" class="text-center text-muted">No stock audits recorded yet. Complete your first audit above!</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 6: SETTINGS -->
       <section id="view-settings" class="tab-view">
         <div class="section-card narrow-card">
           <div class="card-header">
@@ -431,6 +556,29 @@
             <button class="btn btn-primary" id="btn-save-confirmed" onclick="saveConfirmedReceipt()">💾 Confirm & Save Record</button>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PAST AUDIT VIEW MODAL -->
+  <div id="modal-audit-detail" class="modal-overlay" style="display:none;">
+    <div class="split-modal" style="max-width: 900px; height: 80vh;">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <h2 id="audit-detail-title">Stock Audit Snapshot</h2>
+          <span id="audit-detail-date-badge" class="engine-badge">Date: 2026-10-16</span>
+        </div>
+        <button class="btn-close" onclick="closeAuditDetailModal()">✕</button>
+      </div>
+      <div class="modal-body" style="padding: 24px; overflow-y: auto;">
+        <div id="audit-detail-meta" style="margin-bottom: 16px; color: var(--text-muted); font-size: 13px;"></div>
+        <div id="audit-detail-content" class="audit-detail-groups">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeAuditDetailModal()">Close</button>
+        <button class="btn btn-primary" id="btn-load-into-checklist" onclick="loadAuditIntoChecklistFromDetail()">📋 Load Into Form</button>
       </div>
     </div>
   </div>

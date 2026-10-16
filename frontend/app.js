@@ -53,6 +53,7 @@ function switchTab(tabName) {
     receipts: { title: 'Saved Grocery Receipts', subtitle: 'Browse, review, and manage previously confirmed receipts.' },
     reports: { title: 'Spending Reports & Analytics', subtitle: 'Track grocery expenses across providers, categories, and item volumes.' },
     replenish: { title: 'Consumption & Replenishment Estimator', subtitle: 'Predict burn rates and restock deadlines based on past purchase frequency.' },
+    stock: { title: 'Pantry Stock & Inventory Audits', subtitle: 'Periodically record, inspect, and track current pantry inventory counts grouped by category.' },
     settings: { title: 'System & Vision AI Settings', subtitle: 'Configure primary Copencode/OpenAI-compatible endpoint and local Ollama fallback.' }
   };
 
@@ -64,6 +65,7 @@ function switchTab(tabName) {
   if (tabName === 'receipts') loadSavedReceipts();
   if (tabName === 'reports') loadReports();
   if (tabName === 'replenish') loadConsumption();
+  if (tabName === 'stock') loadStockAuditView();
   if (tabName === 'settings') loadSettings();
 }
 
@@ -888,6 +890,662 @@ async function testOllamaConnection() {
   } catch (err) {
     statusEl.className = 'status-msg error';
     statusEl.innerText = `✗ Ollama check failed: ${err.message}`;
+  }
+}
+
+// -------------------------------------------------------------
+// PANTRY STOCK AUDITS & INVENTORY
+// -------------------------------------------------------------
+let stockChecklist = {};
+let stockAuditsHistory = [];
+let activeInspectedAudit = null;
+let receiptCatalogItems = [];
+let activeStockCategoryFilter = 'all';
+let collapsedStockCategories = new Set();
+
+const DEFAULT_CATEGORIES_LOCAL = [
+  { name: "Produce & Fresh", icon: "🥦" },
+  { name: "Dairy & Eggs", icon: "🧀" },
+  { name: "Bakery & Bread", icon: "🥖" },
+  { name: "Meat & Seafood", icon: "🥩" },
+  { name: "Pantry & Dry Goods", icon: "🍚" },
+  { name: "Beverages & Drinks", icon: "☕" },
+  { name: "Snacks & Sweets", icon: "🍪" },
+  { name: "Frozen Foods", icon: "🧊" },
+  { name: "Household & Cleaning", icon: "🧼" },
+  { name: "Personal Care", icon: "🧴" },
+  { name: "Other", icon: "📦" }
+];
+
+function initEmptyStockChecklist() {
+  stockChecklist = {};
+  const cats = categoriesList.length > 0 ? categoriesList : DEFAULT_CATEGORIES_LOCAL;
+  cats.forEach(c => {
+    stockChecklist[c.name] = [];
+  });
+}
+
+async function fetchReceiptItemsCatalog() {
+  try {
+    const res = await fetch('/api/receipt-items/catalog');
+    const data = await res.json();
+    receiptCatalogItems = data.items || [];
+
+    const datalist = document.getElementById('datalist-parsed-items');
+    if (datalist) {
+      datalist.innerHTML = receiptCatalogItems.map(it => 
+        `<option value="${escapeHtml(it.item_name)}">${escapeHtml(it.category)} (${escapeHtml(it.unit || 'unit')})</option>`
+      ).join('');
+    }
+  } catch (err) {
+    console.error('Failed to load receipt items catalog:', err);
+  }
+}
+
+function populateChecklistFromReceiptCatalog(showNotice = false) {
+  if (receiptCatalogItems.length === 0) {
+    if (showNotice) alert('No items found from parsed receipts yet. Scan and confirm receipts first!');
+    return;
+  }
+
+  initEmptyStockChecklist();
+  let count = 0;
+  receiptCatalogItems.forEach(it => {
+    const cat = it.category || 'Other';
+    if (!stockChecklist[cat]) stockChecklist[cat] = [];
+    stockChecklist[cat].push({
+      item_name: it.item_name,
+      quantity: it.avg_quantity ? Math.round(it.avg_quantity * 10) / 10 : 1.0,
+      unit: it.unit || 'unit',
+      status: 'in_stock',
+      notes: '',
+      times_bought: it.times_bought,
+      last_purchased: it.last_purchased
+    });
+    count++;
+  });
+
+  renderStockCategoryPills();
+  renderStockChecklist();
+  if (showNotice) {
+    alert(`✓ Pre-filled checklist with ${count} items parsed from receipts across all categories!`);
+  }
+}
+
+async function loadStockAuditView() {
+  const dateInput = document.getElementById('input-audit-date');
+  if (dateInput && !dateInput.value) {
+    dateInput.value = new Date().toISOString().substring(0, 10);
+  }
+
+  await fetchReceiptItemsCatalog();
+
+  const currentCount = Object.values(stockChecklist).reduce((acc, list) => acc + list.length, 0);
+  if (currentCount === 0 && receiptCatalogItems.length > 0) {
+    populateChecklistFromReceiptCatalog(false);
+  } else if (Object.keys(stockChecklist).length === 0) {
+    initEmptyStockChecklist();
+  }
+
+  renderStockCategoryPills();
+  renderStockChecklist();
+  await loadStockAuditsHistory();
+}
+
+function renderStockCategoryPills() {
+  const pillsContainer = document.getElementById('stock-category-pills');
+  if (!pillsContainer) return;
+
+  const cats = categoriesList.length > 0 ? categoriesList : DEFAULT_CATEGORIES_LOCAL;
+  const totalItems = Object.values(stockChecklist).reduce((acc, list) => acc + list.length, 0);
+
+  let html = `<button type="button" class="pill ${activeStockCategoryFilter === 'all' ? 'active' : ''}" onclick="setStockCategoryFilter('all')">All Items (${totalItems})</button>`;
+
+  cats.forEach(c => {
+    const count = (stockChecklist[c.name] || []).length;
+    if (count > 0 || receiptCatalogItems.some(it => it.category === c.name)) {
+      html += `<button type="button" class="pill ${activeStockCategoryFilter === c.name ? 'active' : ''}" onclick="setStockCategoryFilter('${escapeHtml(c.name)}')">${c.icon || '📦'} ${escapeHtml(c.name)} (${count})</button>`;
+    }
+  });
+
+  pillsContainer.innerHTML = html;
+}
+
+function setStockCategoryFilter(catName) {
+  activeStockCategoryFilter = catName;
+  renderStockCategoryPills();
+  renderStockChecklist();
+}
+
+function markCategoryAllInStock(categoryName) {
+  if (stockChecklist[categoryName]) {
+    stockChecklist[categoryName].forEach(it => it.status = 'in_stock');
+    renderStockChecklist();
+  }
+}
+
+function toggleStockCategoryCollapse(categoryName) {
+  if (collapsedStockCategories.has(categoryName)) {
+    collapsedStockCategories.delete(categoryName);
+  } else {
+    collapsedStockCategories.add(categoryName);
+  }
+  renderStockChecklist();
+}
+
+function expandAllStockCategories() {
+  collapsedStockCategories.clear();
+  renderStockChecklist();
+}
+
+function collapseAllStockCategories() {
+  const cats = categoriesList.length > 0 ? categoriesList : DEFAULT_CATEGORIES_LOCAL;
+  cats.forEach(c => collapsedStockCategories.add(c.name));
+  renderStockChecklist();
+}
+
+function renderStockChecklist() {
+  const container = document.getElementById('stock-categories-checklist');
+  if (!container) return;
+  container.innerHTML = '';
+
+  const cats = categoriesList.length > 0 ? categoriesList : DEFAULT_CATEGORIES_LOCAL;
+  const filterQuery = (document.getElementById('stock-filter-items')?.value || '').toLowerCase().trim();
+
+  let totalItemsCount = 0;
+  let activeCategoriesCount = 0;
+  let inStockCount = 0;
+  let lowCount = 0;
+  let outCount = 0;
+
+  cats.forEach(cat => {
+    const items = stockChecklist[cat.name] || [];
+
+    // Count stats regardless of text search filter
+    items.forEach(it => {
+      totalItemsCount++;
+      if (it.status === 'low') lowCount++;
+      else if (it.status === 'out_of_stock') outCount++;
+      else inStockCount++;
+    });
+    if (items.length > 0) activeCategoriesCount++;
+
+    // Filter by active category pill
+    if (activeStockCategoryFilter !== 'all' && cat.name !== activeStockCategoryFilter) {
+      return;
+    }
+
+    // Filter items if text search active
+    const filteredItems = items.filter(it =>
+      !filterQuery ||
+      (it.item_name || '').toLowerCase().includes(filterQuery) ||
+      cat.name.toLowerCase().includes(filterQuery) ||
+      (it.notes || '').toLowerCase().includes(filterQuery)
+    );
+
+    // If search active and no items match, skip category card
+    if (filterQuery && filteredItems.length === 0 && !cat.name.toLowerCase().includes(filterQuery)) {
+      return;
+    }
+
+    const isCollapsed = collapsedStockCategories.has(cat.name);
+    const card = document.createElement('div');
+    card.className = `stock-category-card ${isCollapsed ? 'is-collapsed' : ''}`;
+
+    const hasItems = items.length > 0;
+    const inStockCountForCat = items.filter(i => i.status === 'in_stock').length;
+    const lowCountForCat = items.filter(i => i.status === 'low').length;
+    const outCountForCat = items.filter(i => i.status === 'out_of_stock').length;
+
+    card.innerHTML = `
+      <div class="cat-card-header" onclick="toggleStockCategoryCollapse('${escapeHtml(cat.name)}')">
+        <div class="cat-title-wrap">
+          <span class="cat-chevron" title="${isCollapsed ? 'Click to expand' : 'Click to collapse'}">▼</span>
+          <span style="font-size: 18px;">${cat.icon || '📦'}</span>
+          <h4>${escapeHtml(cat.name)}</h4>
+          <span class="cat-count-badge ${hasItems ? 'has-items' : ''}">
+            ${items.length} ${items.length === 1 ? 'item' : 'items'}
+          </span>
+          ${isCollapsed && hasItems ? `
+            <span class="cat-collapsed-summary">
+              (🟢 ${inStockCountForCat} in stock${lowCountForCat > 0 ? ` • 🟡 ${lowCountForCat} low` : ''}${outCountForCat > 0 ? ` • 🔴 ${outCountForCat} out` : ''})
+            </span>
+          ` : ''}
+        </div>
+        <div class="stock-cat-actions">
+          ${hasItems ? `
+            <button type="button" class="btn btn-secondary btn-xs" onclick="event.stopPropagation(); markCategoryAllInStock('${escapeHtml(cat.name)}')" title="Set all items in this category to In Stock">
+              ✓ All In Stock
+            </button>
+          ` : ''}
+          <button type="button" class="btn btn-secondary btn-xs" onclick="event.stopPropagation(); addStockItem('${escapeHtml(cat.name)}')">
+            ➕ Add Item
+          </button>
+        </div>
+      </div>
+      <div class="cat-card-body">
+        ${items.length === 0 ? `
+          <div class="stock-cat-empty">
+            <span>No items recorded in ${escapeHtml(cat.name)}.</span>
+            <button type="button" class="btn btn-secondary btn-xs" onclick="addStockItem('${escapeHtml(cat.name)}')">
+              + Add Item
+            </button>
+          </div>
+        ` : `
+          <div class="table-responsive">
+            <table class="stock-items-table">
+              <thead>
+                <tr>
+                  <th style="width: 34%;">Item Name (Parsed from Receipts)</th>
+                  <th style="width: 13%;">Qty</th>
+                  <th style="width: 13%;">Unit</th>
+                  <th style="width: 18%;">Stock Level</th>
+                  <th style="width: 16%;">Notes</th>
+                  <th style="width: 6%; text-align: center;"></th>
+                </tr>
+              </thead>
+              <tbody>
+                ${items.map((item, idx) => `
+                  <tr>
+                    <td>
+                      <div class="stock-item-cell">
+                        ${item.is_custom ? `
+                          <input type="text" list="datalist-parsed-items" class="stock-input" placeholder="Select or type item name..." 
+                                 value="${escapeHtml(item.item_name || '')}" 
+                                 oninput="onStockItemNameInput('${escapeHtml(cat.name)}', ${idx}, this.value)">
+                        ` : `
+                          <span class="stock-item-title">${escapeHtml(item.item_name)}</span>
+                          ${item.times_bought ? `
+                            <span class="stock-item-meta">
+                              Bought ${item.times_bought}x${item.last_purchased ? ` • Last: ${item.last_purchased}` : ''}
+                            </span>
+                          ` : ''}
+                        `}
+                      </div>
+                    </td>
+                    <td>
+                      <input type="number" step="0.5" min="0" class="stock-input" placeholder="0" 
+                             value="${item.quantity !== undefined ? item.quantity : 1}" 
+                             onchange="updateStockItem('${escapeHtml(cat.name)}', ${idx}, 'quantity', parseFloat(this.value)||0)">
+                    </td>
+                    <td>
+                      <input type="text" class="stock-input" placeholder="unit, kg..." 
+                             value="${escapeHtml(item.unit || 'unit')}" 
+                             onchange="updateStockItem('${escapeHtml(cat.name)}', ${idx}, 'unit', this.value)">
+                    </td>
+                    <td>
+                      <select class="stock-level-select" onchange="updateStockItem('${escapeHtml(cat.name)}', ${idx}, 'status', this.value)">
+                        <option value="in_stock" ${item.status === 'in_stock' ? 'selected' : ''}>🟢 In Stock</option>
+                        <option value="low" ${item.status === 'low' ? 'selected' : ''}>🟡 Running Low</option>
+                        <option value="out_of_stock" ${item.status === 'out_of_stock' ? 'selected' : ''}>🔴 Out of Stock</option>
+                      </select>
+                    </td>
+                    <td>
+                      <input type="text" class="stock-input" placeholder="optional notes..." 
+                             value="${escapeHtml(item.notes || '')}" 
+                             onchange="updateStockItem('${escapeHtml(cat.name)}', ${idx}, 'notes', this.value)">
+                    </td>
+                    <td style="text-align: center;">
+                      <button type="button" class="btn-delete-row" title="Remove Item" onclick="deleteStockItem('${escapeHtml(cat.name)}', ${idx})">
+                        🗑️
+                      </button>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        `}
+      </div>
+    `;
+    container.appendChild(card);
+  });
+
+  // Update Stats Ribbon
+  const statTotal = document.getElementById('stat-stock-total-items');
+  const statCats = document.getElementById('stat-stock-categories');
+  const statIn = document.getElementById('stat-stock-in-stock');
+  const statLow = document.getElementById('stat-stock-low');
+  const statOut = document.getElementById('stat-stock-out');
+
+  if (statTotal) statTotal.textContent = totalItemsCount;
+  if (statCats) statCats.textContent = activeCategoriesCount;
+  if (statIn) statIn.textContent = inStockCount;
+  if (statLow) statLow.textContent = lowCount;
+  if (statOut) statOut.textContent = outCount;
+}
+
+function filterStockChecklistView() {
+  renderStockChecklist();
+}
+
+function addStockItem(categoryName) {
+  collapsedStockCategories.delete(categoryName);
+  if (!stockChecklist[categoryName]) {
+    stockChecklist[categoryName] = [];
+  }
+  stockChecklist[categoryName].push({
+    item_name: '',
+    quantity: 1.0,
+    unit: 'unit',
+    status: 'in_stock',
+    notes: '',
+    is_custom: true
+  });
+  renderStockCategoryPills();
+  renderStockChecklist();
+}
+
+function onStockItemNameInput(catName, idx, val) {
+  updateStockItem(catName, idx, 'item_name', val);
+  const matched = receiptCatalogItems.find(i => (i.item_name || '').toLowerCase() === (val || '').toLowerCase().trim());
+  if (matched && matched.unit) {
+    updateStockItem(catName, idx, 'unit', matched.unit);
+  }
+}
+
+function updateStockItem(categoryName, idx, field, value) {
+  if (stockChecklist[categoryName] && stockChecklist[categoryName][idx]) {
+    stockChecklist[categoryName][idx][field] = value;
+    if (field === 'status') {
+      renderStockChecklist();
+    }
+  }
+}
+
+function deleteStockItem(categoryName, idx) {
+  if (stockChecklist[categoryName]) {
+    stockChecklist[categoryName].splice(idx, 1);
+    renderStockCategoryPills();
+    renderStockChecklist();
+  }
+}
+
+function clearStockChecklist() {
+  if (confirm('Clear the entire checklist? This will reset and remove all item rows.')) {
+    initEmptyStockChecklist();
+    renderStockCategoryPills();
+    renderStockChecklist();
+  }
+}
+
+function clearAllStockQuantities() {
+  const totalItems = Object.values(stockChecklist).reduce((acc, list) => acc + list.length, 0);
+  if (totalItems === 0) {
+    alert('No items currently loaded in the checklist.');
+    return;
+  }
+  if (confirm(`Set quantities to 0 for all ${totalItems} loaded items?`)) {
+    Object.keys(stockChecklist).forEach(cat => {
+      (stockChecklist[cat] || []).forEach(it => {
+        it.quantity = 0;
+      });
+    });
+    renderStockChecklist();
+  }
+}
+
+async function saveStockAuditReport() {
+  const dateInput = document.getElementById('input-audit-date');
+  const notesInput = document.getElementById('input-audit-notes');
+  const btn = document.getElementById('btn-save-stock-audit');
+
+  const auditDate = (dateInput?.value || '').trim();
+  if (!auditDate) {
+    alert('Please specify an Audit Date.');
+    return;
+  }
+
+  // Flatten items
+  const items = [];
+  Object.keys(stockChecklist).forEach(cat => {
+    (stockChecklist[cat] || []).forEach(it => {
+      const name = (it.item_name || '').trim();
+      if (name) {
+        items.push({
+          category: cat,
+          item_name: name,
+          quantity: parseFloat(it.quantity) || 0.0,
+          unit: (it.unit || 'unit').trim(),
+          status: it.status || 'in_stock',
+          notes: (it.notes || '').trim()
+        });
+      }
+    });
+  });
+
+  if (items.length === 0) {
+    alert('Please enter at least one item before recording your stock audit report.');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Saving Report...';
+
+  try {
+    const res = await fetch('/api/stock-audits', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        audit_date: auditDate,
+        notes: (notesInput?.value || '').trim(),
+        items: items
+      })
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.detail || 'Server failed to save audit');
+    }
+
+    alert(`✓ Stock audit recorded successfully! (${items.length} items on ${auditDate})`);
+    await loadStockAuditsHistory();
+  } catch (err) {
+    alert(`Failed to save stock audit: ${err.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '💾 Record Stock Report';
+  }
+}
+
+async function loadPreviousAuditIntoChecklist() {
+  try {
+    const res = await fetch('/api/stock-audits/latest');
+    const data = await res.json();
+    if (!data.audit || !data.audit.items || data.audit.items.length === 0) {
+      alert('No previous stock audit found to load. Start by adding items to the categories above!');
+      return;
+    }
+
+    initEmptyStockChecklist();
+    data.audit.items.forEach(it => {
+      const cat = it.category || 'Other';
+      if (!stockChecklist[cat]) stockChecklist[cat] = [];
+      stockChecklist[cat].push({
+        item_name: it.item_name,
+        quantity: it.quantity,
+        unit: it.unit || 'unit',
+        status: it.status || 'in_stock',
+        notes: it.notes || ''
+      });
+    });
+
+    const notesInput = document.getElementById('input-audit-notes');
+    if (notesInput) {
+      notesInput.value = `Updated from previous audit on ${data.audit.audit_date}`;
+    }
+
+    renderStockCategoryPills();
+    renderStockChecklist();
+    alert(`✓ Loaded ${data.audit.items.length} items from previous audit (${data.audit.audit_date}). You can now adjust current counts!`);
+  } catch (err) {
+    alert(`Failed to load previous audit: ${err.message}`);
+  }
+}
+
+async function loadStockAuditsHistory() {
+  const tbody = document.getElementById('tbody-stock-history');
+  if (!tbody) return;
+
+  try {
+    const res = await fetch('/api/stock-audits');
+    const data = await res.json();
+    stockAuditsHistory = data.audits || [];
+
+    if (stockAuditsHistory.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No stock audits recorded yet. Complete your first audit above!</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = '';
+    stockAuditsHistory.forEach(a => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><strong>${escapeHtml(a.audit_date)}</strong></td>
+        <td><span class="text-muted" style="font-size:12px;">${(a.created_at || '').substring(0, 16)}</span></td>
+        <td><strong>${a.item_count || 0}</strong> items</td>
+        <td><span class="badge badge-info">${a.category_count || 0} categories</span></td>
+        <td>
+          <span class="stock-badge in_stock" title="In Stock">🟢 ${a.in_stock_count || 0}</span>
+          ${a.low_stock_count > 0 ? `<span class="stock-badge low" title="Running Low">🟡 ${a.low_stock_count}</span>` : ''}
+          ${a.out_of_stock_count > 0 ? `<span class="stock-badge out_of_stock" title="Out of Stock">🔴 ${a.out_of_stock_count}</span>` : ''}
+        </td>
+        <td>${a.notes ? escapeHtml(a.notes) : '<span class="text-dim">—</span>'}</td>
+        <td>
+          <div style="display:flex; gap:6px;">
+            <button class="btn btn-secondary btn-xs" onclick="openAuditDetailModal(${a.id})">Inspect</button>
+            <button class="btn btn-secondary btn-xs" onclick="loadAuditIntoChecklistById(${a.id})" title="Load this audit into the form above">Load</button>
+            <button class="btn-delete-row" title="Delete Audit" onclick="deleteStockAuditReport(${a.id})">🗑️</button>
+          </div>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center" style="color:var(--accent-rose);">Failed to load history: ${err.message}</td></tr>`;
+  }
+}
+
+async function openAuditDetailModal(auditId) {
+  try {
+    const res = await fetch(`/api/stock-audits/${auditId}`);
+    const data = await res.json();
+    if (!data.audit) throw new Error('Audit not found');
+
+    activeInspectedAudit = data.audit;
+    document.getElementById('audit-detail-title').innerText = `Stock Audit: ${data.audit.audit_date}`;
+    document.getElementById('audit-detail-date-badge').innerText = `Snapshot #${data.audit.id} • ${data.audit.audit_date}`;
+    document.getElementById('audit-detail-meta').innerHTML = `
+      <strong>Recorded:</strong> ${data.audit.created_at || data.audit.audit_date} • 
+      <strong>Total Items:</strong> ${data.audit.items.length}
+      ${data.audit.notes ? ` • <strong>Notes:</strong> ${escapeHtml(data.audit.notes)}` : ''}
+    `;
+
+    // Group items by category
+    const grouped = {};
+    data.audit.items.forEach(it => {
+      const c = it.category || 'Other';
+      if (!grouped[c]) grouped[c] = [];
+      grouped[c].push(it);
+    });
+
+    const content = document.getElementById('audit-detail-content');
+    content.innerHTML = '';
+
+    Object.keys(grouped).sort().forEach(catName => {
+      const groupCard = document.createElement('div');
+      groupCard.className = 'audit-detail-group-card';
+      const itemsList = grouped[catName];
+
+      groupCard.innerHTML = `
+        <div class="audit-detail-group-header">
+          <span>📦</span>
+          <span>${escapeHtml(catName)} (${itemsList.length})</span>
+        </div>
+        <table class="stock-items-table" style="font-size:13px;">
+          <thead>
+            <tr>
+              <th>Item Name</th>
+              <th>Quantity</th>
+              <th>Status</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemsList.map(it => `
+              <tr>
+                <td><strong>${escapeHtml(it.item_name)}</strong></td>
+                <td>${it.quantity} ${escapeHtml(it.unit || 'unit')}</td>
+                <td>
+                  <span class="stock-badge ${it.status}">
+                    ${it.status === 'in_stock' ? '🟢 In Stock' : it.status === 'low' ? '🟡 Running Low' : '🔴 Out of Stock'}
+                  </span>
+                </td>
+                <td>${it.notes ? escapeHtml(it.notes) : '<span class="text-dim">—</span>'}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+      content.appendChild(groupCard);
+    });
+
+    document.getElementById('modal-audit-detail').style.display = 'flex';
+  } catch (err) {
+    alert(`Failed to load audit snapshot: ${err.message}`);
+  }
+}
+
+function closeAuditDetailModal() {
+  document.getElementById('modal-audit-detail').style.display = 'none';
+  activeInspectedAudit = null;
+}
+
+function loadAuditIntoChecklistFromDetail() {
+  if (!activeInspectedAudit) return;
+  loadAuditDataIntoChecklist(activeInspectedAudit);
+  closeAuditDetailModal();
+}
+
+function loadAuditIntoChecklistById(auditId) {
+  openAuditDetailModal(auditId).then(() => {
+    loadAuditIntoChecklistFromDetail();
+  });
+}
+
+function loadAuditDataIntoChecklist(audit) {
+  initEmptyStockChecklist();
+  (audit.items || []).forEach(it => {
+    const cat = it.category || 'Other';
+    if (!stockChecklist[cat]) stockChecklist[cat] = [];
+    stockChecklist[cat].push({
+      item_name: it.item_name,
+      quantity: it.quantity,
+      unit: it.unit || 'unit',
+      status: it.status || 'in_stock',
+      notes: it.notes || ''
+    });
+  });
+
+  const notesInput = document.getElementById('input-audit-notes');
+  if (notesInput) {
+    notesInput.value = `Loaded from audit on ${audit.audit_date}`;
+  }
+
+  renderStockCategoryPills();
+  renderStockChecklist();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+async function deleteStockAuditReport(auditId) {
+  if (!confirm('Are you sure you want to delete this recorded stock audit?')) return;
+
+  try {
+    const res = await fetch(`/api/stock-audits/${auditId}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Delete failed');
+    await loadStockAuditsHistory();
+  } catch (err) {
+    alert(`Failed to delete audit: ${err.message}`);
   }
 }
 

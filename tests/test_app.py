@@ -362,3 +362,138 @@ def test_duplicate_receipt_detection_via_invoice_id():
     assert len(resp_list.json()["receipts"]) == 1
 
 
+def test_stock_audit_crud_and_endpoints():
+    from backend.db import get_stock_audits, get_stock_audit, get_latest_stock_audit, delete_stock_audit
+
+    # 1. Initially no stock audits
+    res = client.get("/api/stock-audits")
+    assert res.status_code == 200
+    assert res.json()["audits"] == []
+
+    res_latest_empty = client.get("/api/stock-audits/latest")
+    assert res_latest_empty.status_code == 200
+    assert res_latest_empty.json()["audit"] is None
+
+    # 2. Create a stock audit
+    audit_payload = {
+        "audit_date": "2026-10-16",
+        "notes": "Weekly Friday Pantry Check",
+        "items": [
+            {
+                "item_name": "Whole Milk 1L",
+                "category": "Dairy & Eggs",
+                "quantity": 2.0,
+                "unit": "units",
+                "status": "in_stock",
+                "notes": "Unopened in fridge"
+            },
+            {
+                "item_name": "Eggs 12pk",
+                "category": "Dairy & Eggs",
+                "quantity": 3.0,
+                "unit": "units",
+                "status": "low",
+                "notes": "Need to reorder soon"
+            },
+            {
+                "item_name": "Olive Oil 1L",
+                "category": "Pantry & Dry Goods",
+                "quantity": 0.0,
+                "unit": "bottles",
+                "status": "out_of_stock",
+                "notes": "Empty bottle thrown away"
+            }
+        ]
+    }
+
+    create_res = client.post("/api/stock-audits", json=audit_payload)
+    assert create_res.status_code == 200
+    audit_id = create_res.json()["audit_id"]
+    assert audit_id > 0
+
+    # 3. List stock audits
+    list_res = client.get("/api/stock-audits")
+    assert list_res.status_code == 200
+    audits = list_res.json()["audits"]
+    assert len(audits) == 1
+    assert audits[0]["id"] == audit_id
+    assert audits[0]["item_count"] == 3
+    assert audits[0]["category_count"] == 2
+    assert audits[0]["in_stock_count"] == 1
+    assert audits[0]["low_stock_count"] == 1
+    assert audits[0]["out_of_stock_count"] == 1
+
+    # 4. Fetch specific stock audit
+    audit_res = client.get(f"/api/stock-audits/{audit_id}")
+    assert audit_res.status_code == 200
+    fetched_audit = audit_res.json()["audit"]
+    assert fetched_audit["id"] == audit_id
+    assert fetched_audit["audit_date"] == "2026-10-16"
+    assert len(fetched_audit["items"]) == 3
+    categories_found = {item["category"] for item in fetched_audit["items"]}
+    assert categories_found == {"Dairy & Eggs", "Pantry & Dry Goods"}
+
+    # 5. Fetch latest stock audit
+    latest_res = client.get("/api/stock-audits/latest")
+    assert latest_res.status_code == 200
+    latest_audit = latest_res.json()["audit"]
+    assert latest_audit is not None
+    assert latest_audit["id"] == audit_id
+
+    # 6. Delete stock audit
+    del_res = client.delete(f"/api/stock-audits/{audit_id}")
+    assert del_res.status_code == 200
+    assert del_res.json()["success"] is True
+
+    # Verify audit is gone
+    audit_res_after = client.get(f"/api/stock-audits/{audit_id}")
+    assert audit_res_after.status_code == 404
+
+
+def test_receipt_items_catalog_endpoint():
+    # 1. Save a sample receipt
+    receipt_payload = {
+        "filename": "catalog_receipt_test.jpg",
+        "provider": "Mercadona",
+        "receipt_date": "2026-10-15",
+        "total_amount": 7.50,
+        "items": [
+            {
+                "name": "LECHE SEMIDESNATADA",
+                "clean_name": "Semi-Skimmed Milk 1L",
+                "quantity": 2.0,
+                "unit": "pack",
+                "unit_price": 0.95,
+                "total_price": 1.90,
+                "category": "Dairy & Eggs"
+            },
+            {
+                "name": "ARROZ REDONDO 1KG",
+                "clean_name": "Round Rice 1kg",
+                "quantity": 1.0,
+                "unit": "kg",
+                "unit_price": 1.35,
+                "total_price": 1.35,
+                "category": "Pantry & Dry Goods"
+            }
+        ]
+    }
+    client.post("/api/receipts/save", json=receipt_payload)
+
+    # 2. Query catalog endpoint
+    res = client.get("/api/receipt-items/catalog")
+    assert res.status_code == 200
+    catalog = res.json()["items"]
+    assert len(catalog) == 2
+    item_names = [i["item_name"] for i in catalog]
+    assert "Semi-Skimmed Milk 1L" in item_names
+    assert "Round Rice 1kg" in item_names
+    milk = next(i for i in catalog if i["item_name"] == "Semi-Skimmed Milk 1L")
+    assert milk["category"] == "Dairy & Eggs"
+    assert milk["unit"] == "pack"
+    assert milk["times_bought"] == 1
+    assert milk["last_purchased"] == "2026-10-15"
+
+
+
+
