@@ -17,15 +17,24 @@ let consumptionFilter = 'all';
 let chartProviders = null;
 let chartCategories = null;
 
-// Initialize app on DOM ready
-document.addEventListener('DOMContentLoaded', () => {
+// Initialize app on DOM ready (or immediately if DOM is already parsed)
+function startApp() {
   initApp();
-});
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', startApp);
+} else {
+  startApp();
+}
 
 async function initApp() {
-  await loadCategories();
-  await loadReceiptFiles();
-  await checkEngineStatus();
+  // Initialize parallel components independently so one failure cannot block the rest
+  await Promise.allSettled([
+    loadCategories(),
+    loadReceiptFiles(),
+    checkEngineStatus()
+  ]);
 }
 
 // Tab Switching
@@ -131,10 +140,15 @@ async function checkEngineStatus() {
 // -------------------------------------------------------------
 async function loadReceiptFiles() {
   const grid = document.getElementById('receipt-files-grid');
+  if (!grid) return;
   grid.innerHTML = '<div class="loading-state">Scanning /receipts folder...</div>';
 
   try {
     const res = await fetch('/api/receipts/files');
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.detail || `Server error (${res.status})`);
+    }
     const data = await res.json();
     receiptFiles = data.files || [];
 
@@ -172,10 +186,10 @@ async function loadReceiptFiles() {
         <div class="file-info">
           <div class="file-icon">🧾</div>
           <div class="file-details">
-            <h4>${file.filename}</h4>
+            <h4>${escapeHtml(file.filename)}</h4>
             <div class="file-meta">
               <span>${sizeKB} KB</span> • 
-              <span>${file.modified_at}</span>
+              <span>${escapeHtml(file.modified_at || '')}</span>
             </div>
             ${isSaved ? `
               <div class="file-saved-meta">
@@ -198,9 +212,9 @@ async function loadReceiptFiles() {
           </span>
           <div style="display:flex; gap:6px;">
             ${isSaved ? `
-              <button class="btn btn-secondary btn-sm" onclick="viewExistingReceipt(${file.receipt_id}, '${file.filename}')">View</button>
+              <button class="btn btn-secondary btn-sm" onclick="viewExistingReceipt(${file.receipt_id}, '${escapeHtml(file.filename)}')">View</button>
             ` : ''}
-            <button class="btn btn-primary btn-sm" onclick="parseReceiptFile('${file.filename}')">
+            <button class="btn btn-primary btn-sm" onclick="parseReceiptFile('${escapeHtml(file.filename)}')">
               ${isSaved ? 'Re-Parse' : '⚡ Parse Receipt'}
             </button>
           </div>
@@ -209,7 +223,12 @@ async function loadReceiptFiles() {
       grid.appendChild(card);
     });
   } catch (err) {
-    grid.innerHTML = `<div class="error-state">Failed to scan receipts directory: ${err.message}</div>`;
+    grid.innerHTML = `
+      <div class="error-state" style="padding: 24px; text-align: center;">
+        <p style="color: var(--accent-rose); margin-bottom: 12px;">Failed to scan receipts directory: ${escapeHtml(err.message)}</p>
+        <button class="btn btn-secondary btn-sm" onclick="loadReceiptFiles()">🔄 Retry Scan</button>
+      </div>
+    `;
   }
 }
 

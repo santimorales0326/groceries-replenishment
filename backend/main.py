@@ -56,6 +56,16 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def add_no_cache_headers(request, call_next):
+    response = await call_next(request)
+    if request.url.path.endswith((".html", ".js", ".css")) or request.url.path == "/":
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
+
 # Pydantic Schemas
 class ItemSchema(BaseModel):
     name: str
@@ -108,26 +118,33 @@ def list_receipt_files():
     valid_exts = {".jpg", ".jpeg", ".png", ".webp", ".pdf"}
     files = []
 
-    if RECEIPTS_DIR.exists():
-        for f in RECEIPTS_DIR.iterdir():
-            if f.is_file() and f.suffix.lower() in valid_exts:
-                stat = f.stat()
-                existing = get_receipt_by_filename(f.name)
-                files.append({
-                    "filename": f.name,
-                    "size_bytes": stat.st_size,
-                    "modified_at": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
-                    "status": "saved" if existing else "unprocessed",
-                    "receipt_id": existing["id"] if existing else None,
-                    "provider": existing["provider"] if existing else None,
-                    "invoice_id": existing.get("invoice_id") if existing else None,
-                    "receipt_date": existing["receipt_date"] if existing else None,
-                    "total_amount": existing["total_amount"] if existing else None,
-                    "item_count": len(existing["items"]) if existing else 0,
-                })
+    try:
+        if RECEIPTS_DIR.exists():
+            for f in RECEIPTS_DIR.iterdir():
+                try:
+                    if f.is_file() and f.suffix.lower() in valid_exts:
+                        stat = f.stat()
+                        existing = get_receipt_by_filename(f.name)
+                        files.append({
+                            "filename": f.name,
+                            "size_bytes": stat.st_size,
+                            "modified_at": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                            "status": "saved" if existing else "unprocessed",
+                            "receipt_id": existing["id"] if existing else None,
+                            "provider": existing["provider"] if existing else None,
+                            "invoice_id": existing.get("invoice_id") if existing else None,
+                            "receipt_date": existing["receipt_date"] if existing else None,
+                            "total_amount": existing["total_amount"] if existing else None,
+                            "item_count": len(existing["items"]) if existing else 0,
+                        })
+                except Exception as file_err:
+                    print(f"[Warning] Error reading receipt file {f}: {file_err}")
+                    continue
 
-    files.sort(key=lambda x: x["filename"], reverse=True)
-    return {"files": files, "count": len(files)}
+        files.sort(key=lambda x: x["filename"], reverse=True)
+        return {"files": files, "count": len(files)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to scan receipts directory: {str(e)}")
 
 
 @app.post("/api/receipts/parse/{filename}")
